@@ -1,9 +1,15 @@
 import { createHash } from "node:crypto";
+import { getData as getPdfWorker } from "pdf-parse/worker";
 import { PDFParse } from "pdf-parse";
 import { kseiDate, parseKseiDividendText, type DividendEvent } from "./dividend-parser";
 
 const KSEI = "https://web.ksei.co.id";
 type ListedNotice = { url: string; announcementDate: string | null; sourceReference: string | null };
+
+// Next.js bundles server modules separately, so pdf-parse cannot infer its
+// adjacent worker file. Its packaged data URL keeps the worker self-contained
+// on Vercel and in local Next.js runtimes.
+PDFParse.setWorker(getPdfWorker());
 
 function stripHtml(value: string) { return value.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim(); }
 

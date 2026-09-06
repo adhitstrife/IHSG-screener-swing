@@ -14,7 +14,10 @@ export async function upsertDividendEvents(events: DividendEvent[], options: { s
     if (error) throw new Error("Dividen KSEI belum tersimpan. Terapkan migrasi database dividend calendar.");
   }
   const { error } = await client.from("dividend_sync_runs").insert({ synced_at: syncedAt, status: "completed", events_found: events.length, coverage_start: options.coverageStart ?? null, warnings: options.warnings ?? [] });
-  if (error) throw new Error("Status sinkronisasi dividen belum tersimpan.");
+  if (error) {
+    console.error("Dividend sync run storage failed", error);
+    throw new Error("Status sinkronisasi dividen belum tersimpan.");
+  }
 }
 
 export async function recordDividendSyncFailure(message: string) {
