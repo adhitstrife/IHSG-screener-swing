@@ -75,6 +75,14 @@ The AI explains the same indicators and filters. It cannot activate a rejected s
 - Apply `supabase/migrations/202609060001_swing_screener.sql` to your Supabase database before using persistent swing history. It creates a separate RLS-protected snapshot table; old BSJP runs remain intact and cannot be loaded as swing results. Each snapshot is saved atomically. Storage failure is a warning on the interactive scan, not a loss of market results.
 - Scheduled scans run at 10:00 UTC / 17:00 WIB on weekdays (`vercel.json`). Cron requires Supabase and `CRON_SECRET`; the old intraday history sync is no longer part of this job. The scheduled job now warms only page one, rather than scanning the entire candidate list. Interactive and cron routes request 240 seconds; ensure hosting supports that timeout.
 
+## Dividend calendar
+
+`/dividends` lists announced IDX cash dividends from official KSEI documents. The purchase deadline is the published **Cum Dividen di Pasar Reguler & Pasar Negosiasi** date, not a date inferred from a provider’s ex-dividend field. It also displays the announced gross dividend per share, ex date, record date, payment date, and a source link.
+
+Apply `supabase/migrations/202609070001_dividend_calendar.sql` before enabling the calendar. KSEI announcements are parsed only by the authenticated `/api/cron/dividends` job; page visits read cached records and never download announcements or run stock analysis. The first authenticated run should use `?bootstrap=1` to ingest the last 12 announcement months. The daily Vercel cron then rechecks the current and prior two months at 06:00 WIB. Failed or incomplete source reads retain prior records and appear as synchronization warnings.
+
+The calendar includes cash dividends for IDX shares only. It excludes stock dividends, rights issues, tax estimates, dividend yield calculations, and unannounced forecasts. KSEI can revise a schedule; a later notice with the same stock, regular-market cum date, and dividend type replaces the cached schedule and retains its official source URL.
+
 ## Historical evaluation
 
 `/api/backtest` and `/api/backtest/research` use the same swing engine on up to two years of daily data. The dashboard runs this only when requested, since it makes additional Yahoo history requests. Research reports `unvalidated`; positive historical returns do not prove a live edge. The previous intraday research endpoint returns HTTP 410 with the swing replacement endpoint.
