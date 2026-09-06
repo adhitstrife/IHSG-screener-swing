@@ -1,69 +1,164 @@
-import Image from "next/image";
+"use client";
+
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import type { ScreenerSnapshot, ScreenerStock } from "@/lib/screener";
+import { isFreshSnapshot } from "@/lib/market-data";
+import type { BacktestResult } from "@/lib/backtest";
+
+const fmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 });
+const price = (value: number) => `Rp${fmt.format(value)}`;
+const percent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+const turnover = (value: number) => `Rp${(value / 1_000_000_000).toFixed(1)} M`;
+const inputClass = "rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100";
 
 export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+  const scanRequest = useRef<AbortController | null>(null);
+  const pageCache = useRef(new Map<number, ScreenerSnapshot>());
+  const universeId = useRef<string | undefined>(undefined);
+  const [page, setPage] = useState(1);
+  const [pageCount, setPageCount] = useState(1);
+  const [query, setQuery] = useState("");
+  const [minimumScore, setMinimumScore] = useState(0);
+  const [onlyEligible, setOnlyEligible] = useState(false);
+  const [setup, setSetup] = useState("all");
+  const [sort, setSort] = useState("score");
+  const [snapshot, setSnapshot] = useState<ScreenerSnapshot>();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
+  const [expanded, setExpanded] = useState<string>();
+  const [backtest, setBacktest] = useState<BacktestResult>();
+  const [testing, setTesting] = useState(false);
+  const [testError, setTestError] = useState<string>();
+
+  const loadScreener = useCallback(async (targetPage = 1, refresh = false) => {
+    scanRequest.current?.abort();
+    const controller = new AbortController();
+    scanRequest.current = controller;
+    setPage(targetPage); setExpanded(undefined); setError(undefined);
+    const cached = pageCache.current.get(targetPage);
+    if (!refresh && cached && cached.meta.universeId === universeId.current && isFreshSnapshot(cached.meta.generatedAt)) {
+      setSnapshot(cached); setPageCount(cached.meta.totalPages ?? 1); setLoading(false); return;
+    }
+    setSnapshot(undefined); setLoading(true);
+    if (refresh) pageCache.current.delete(targetPage);
+    try {
+      const params = new URLSearchParams({ page: String(targetPage) });
+      if (refresh) params.set("refresh", "1");
+      else if (universeId.current) params.set("universeId", universeId.current);
+      const response = await fetch("/api/screener?" + params, { cache: "no-store", signal: controller.signal });
+      const payload = await response.json() as ScreenerSnapshot & { error?: string };
+      if (controller.signal.aborted) return;
+      if (!response.ok) {
+        if (response.status === 409) { pageCache.current.clear(); universeId.current = undefined; setPage(1); setPageCount(1); }
+        throw new Error(payload.error ?? "Gagal memuat halaman saham.");
+      }
+      if (payload.meta.universeId !== universeId.current) pageCache.current.clear();
+      universeId.current = payload.meta.universeId;
+      pageCache.current.set(targetPage, payload);
+      setSnapshot(payload); setPageCount(payload.meta.totalPages ?? 1);
+    } catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Gagal memuat halaman saham."); }
+    finally { if (scanRequest.current === controller) setLoading(false); }
+  }, []);
+  useEffect(() => { const timer = window.setTimeout(() => { void loadScreener(); }, 0); return () => { window.clearTimeout(timer); scanRequest.current?.abort(); }; }, [loadScreener]);
+
+  const results = useMemo(() => {
+    const rows = (snapshot?.data ?? []).filter((stock) => `${stock.symbol} ${stock.name}`.toLowerCase().includes(query.trim().toLowerCase()) && stock.score >= minimumScore && (!onlyEligible || stock.eligible) && (setup === "all" || stock.setup === setup));
+    return rows.sort((a, b) => sort === "rr" ? (b.plan?.netRewardRisk ?? -1) - (a.plan?.netRewardRisk ?? -1) : sort === "momentum" ? b.indicators.momentum20 - a.indicators.momentum20 : Number(b.eligible) - Number(a.eligible) || b.score - a.score || a.symbol.localeCompare(b.symbol));
+  }, [snapshot, query, minimumScore, onlyEligible, setup, sort]);
+  const activeCount = snapshot?.data.filter((stock) => stock.eligible).length ?? 0;
+  const dates = [...new Set(snapshot?.data.map((stock) => stock.asOf) ?? [])].sort();
+  const latestDate = dates.at(-1) ?? "—";
+  const scanWarnings = snapshot ? [...snapshot.meta.warnings, ...snapshot.meta.failures.map((failure) => `${failure.symbol}: ${failure.reason}`)] : [];
+  const staleCount = snapshot?.data.filter((stock) => stock.stale).length ?? 0;
+
+  async function runBacktest() {
+    setTesting(true); setTestError(undefined);
+    try {
+      const response = await fetch("/api/backtest", { cache: "no-store" });
+      const payload = await response.json() as BacktestResult & { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Backtest gagal.");
+      setBacktest(payload);
+    } catch (reason) { setTestError(reason instanceof Error ? reason.message : "Backtest gagal."); }
+    finally { setTesting(false); }
+  }
+
+  return <main className="min-h-screen bg-[#f6f8fb] text-slate-900">
+    <header className="border-b border-slate-200 bg-white"><div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4 lg:px-8">
+      <Link href="/" className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-600 text-lg font-black text-white">S</span><span><span className="block text-sm font-bold">IDX Swing Screener</span><span className="block text-xs text-slate-500">Trend · Setup · Risk</span></span></Link>
+      <span className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700">Horizon 3–15 sesi</span>
+    </div></header>
+    <div className="mx-auto max-w-7xl px-5 py-8 lg:px-8">
+      <section className="mb-7 flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
+        <div><p className="mb-2 text-sm font-semibold text-indigo-600">Swing trading · Bursa Efek Indonesia</p><h1 className="max-w-3xl text-3xl font-bold tracking-tight sm:text-4xl">Cari tren yang kuat.<br className="hidden sm:block" /> Masuk dengan rencana.</h1><p className="mt-4 max-w-2xl text-sm leading-6 text-slate-600">Temukan breakout dan pantulan di tren naik dengan konfirmasi volume, likuiditas, serta ruang target yang cukup. Setiap kandidat memiliki alasan, batas entry, dan risiko yang terukur.</p></div>
+        <button onClick={() => void loadScreener(page, true)} disabled={loading || testing} className="shrink-0 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60">{loading ? "Memindai candle harian…" : "Perbarui halaman ini ↗"}</button>
+      </section>
+      <section className="mb-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric label="Setup lolos di halaman ini" value={snapshot ? String(activeCount) : "—"} note="Semua filter wajib terpenuhi" />
+        <Metric label="Cakupan halaman" value={snapshot ? `${snapshot.meta.scannedSize} / ${snapshot.meta.pageCandidateCount}` : "—"} note={snapshot?.meta.failures.length ? `${snapshot.meta.failures.length} saham gagal / dilewati` : `Dari ${snapshot?.meta.universeSize ?? 0} kandidat filter awal`} />
+        <Metric label="Candle selesai terbaru" value={latestDate} note={dates.length > 1 ? `Tanggal bervariasi; ${staleCount} data tertinggal` : "Candle hari ini dipakai mulai 16.30 WIB"} />
+        <Metric label="Scan dibuat" value={snapshot ? new Date(snapshot.meta.generatedAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }) + " WIB" : "—"} note={snapshot ? `${snapshot.meta.source} · cache maks. 15 menit` : "Menunggu data provider"} />
+      </section>
+      {snapshot?.meta.candidateFilter && <p className="mb-4 text-sm text-slate-600">{snapshot.meta.candidateSource}: {snapshot.meta.candidateFilter}. Cakupan adalah kandidat filter, bukan seluruh BEI.</p>}
+      {loading && <p role="status" className="mb-4 text-sm text-indigo-700">Menganalisis maksimal 10 kandidat pada halaman {page}…</p>}
+      {error && <p role="alert" className="mb-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</p>}
+      {scanWarnings.length > 0 && <details className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><summary className="cursor-pointer font-semibold">Scan memiliki {scanWarnings.length} catatan cakupan / penyimpanan</summary><ul className="mt-3 space-y-2">{scanWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
+      <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="min-w-52 flex-1 text-xs font-semibold text-slate-500">Cari di halaman ini<input aria-label="Cari kode atau nama saham" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Kode atau nama saham" className={`${inputClass} mt-1.5 block w-full font-normal`} /></label>
+          <label className="text-xs font-semibold text-slate-500">Setup<select value={setup} onChange={(event) => setSetup(event.target.value)} className={`${inputClass} mt-1.5 block`}><option value="all">Semua setup</option><option value="breakout">Breakout</option><option value="pullback">Pullback</option><option value="watch">Belum terbentuk</option></select></label>
+          <label className="text-xs font-semibold text-slate-500">Skor minimum<select value={minimumScore} onChange={(event) => setMinimumScore(Number(event.target.value))} className={`${inputClass} mt-1.5 block`}><option value={0}>Semua skor</option><option value={60}>60</option><option value={70}>70</option><option value={80}>80</option><option value={90}>90</option></select></label>
+          <label className="text-xs font-semibold text-slate-500">Urutkan<select value={sort} onChange={(event) => setSort(event.target.value)} className={`${inputClass} mt-1.5 block`}><option value="score">Kelayakan & skor</option><option value="rr">R:R net</option><option value="momentum">Momentum 20 sesi</option></select></label>
+          <label className="flex cursor-pointer items-center gap-2 py-2 text-sm text-slate-600"><input checked={onlyEligible} onChange={(event) => setOnlyEligible(event.target.checked)} type="checkbox" className="h-4 w-4 accent-indigo-600" /> Hanya setup lolos</label>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </section>
+      <section aria-busy={loading} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4"><div><h2 className="font-bold">Watchlist swing</h2><p className="mt-1 text-xs leading-5 text-slate-500">10 kandidat per halaman, urutan kode A–Z. Pencarian, filter dan peringkat hanya berlaku pada halaman ini.</p></div><span className="shrink-0 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{results.length} saham</span></div>
+        <div className="overflow-x-auto"><table className="w-full min-w-[1050px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr>{["Saham / harga", "Setup", "Tren 20 sesi", "RVOL / RSI", "Zona entry", "Stop / target", "R:R net", "Skor", ""].map((title) => <th key={title} className="px-4 py-3 font-semibold">{title}</th>)}</tr></thead>
+          <tbody className="divide-y divide-slate-100">{results.map((stock) => <Fragment key={stock.symbol}><tr className="transition hover:bg-slate-50">
+            <td className="px-4 py-4"><p className="font-bold">{stock.symbol} <span className="ml-1 font-medium text-slate-500">{price(stock.price)}</span></p><p className="mt-1 max-w-48 truncate text-xs text-slate-500">{stock.name}</p><p className="mt-1 text-xs text-slate-400">{stock.asOf}{stock.stale ? " · tertinggal" : ""}</p></td>
+            <td className="px-4 py-4"><span className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${stock.eligible ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{stock.signal}</span></td>
+            <td className={`px-4 py-4 font-semibold ${stock.indicators.momentum20 >= 0 ? "text-emerald-600" : "text-rose-600"}`}>{percent(stock.indicators.momentum20)}<p className="mt-1 text-xs font-normal text-slate-500">1D {percent(stock.change)}</p></td>
+            <td className="px-4 py-4"><p className="font-semibold">{stock.indicators.volumeRatio20.toFixed(2)}×</p><p className="mt-1 text-xs text-slate-500">RSI {stock.indicators.rsi14.toFixed(1)}</p></td>
+            <td className="px-4 py-4 text-xs font-semibold">{stock.eligible && stock.plan ? <>{price(stock.plan.entryMin)}<br />– {price(stock.plan.entryMax)}</> : <span className="text-slate-400">Belum aktif</span>}</td>
+            <td className="px-4 py-4 text-xs font-semibold">{stock.eligible && stock.plan ? <><p className="text-rose-600">{price(stock.plan.stop)}</p><p className="mt-1 text-emerald-600">{price(stock.plan.target)}</p></> : "—"}</td>
+            <td className="px-4 py-4 font-semibold">{stock.plan ? `${stock.plan.netRewardRisk.toFixed(2)}×` : "—"}</td>
+            <td className="px-4 py-4"><p className="font-bold">{stock.score}<span className="text-xs font-normal text-slate-400"> /100</span></p><div className="mt-2 h-1 w-16 rounded bg-slate-100"><div className="h-1 rounded bg-indigo-500" style={{ width: `${stock.score}%` }} /></div></td>
+            <td className="px-4 py-4"><button aria-expanded={expanded === stock.symbol} aria-controls={`detail-${stock.symbol}`} onClick={() => setExpanded(expanded === stock.symbol ? undefined : stock.symbol)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-50">{expanded === stock.symbol ? "Tutup" : "Detail"}</button></td>
+          </tr>{expanded === stock.symbol && <tr id={`detail-${stock.symbol}`}><td colSpan={9} className="bg-slate-50 px-5 py-5"><StockDetail stock={stock} /></td></tr>}</Fragment>)}</tbody>
+        </table></div>
+        {loading && !snapshot && <p role="status" className="p-10 text-center text-sm text-slate-500">Mengambil candle harian Yahoo Finance dan menghitung setup.</p>}
+        {!loading && !results.length && <div className="p-10 text-center"><p className="font-semibold">{error && !snapshot ? "Data scan belum tersedia." : snapshot?.meta.universeSize === 0 ? "Tidak ada kandidat dari filter awal." : snapshot?.meta.scannedSize === 0 && snapshot.meta.failures.length ? "Histori seluruh kandidat gagal diproses." : "Belum ada saham yang sesuai filter."}</p><p className="mt-2 text-sm text-slate-500">Setup yang tidak lolos tetap dapat diperiksa untuk memahami faktor penghambat.</p><button onClick={() => { setMinimumScore(0); setOnlyEligible(false); setSetup("all"); setQuery(""); }} className="mt-4 text-sm font-semibold text-indigo-600">Lihat semua hasil halaman ini</button></div>}
+      </section>
+      <nav aria-label="Halaman saham" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm">
+        <button disabled={loading || page <= 1} onClick={() => void loadScreener(page - 1)} className="rounded-lg border border-slate-200 px-4 py-2 font-semibold disabled:opacity-40">Sebelumnya</button>
+        <label className="flex items-center gap-2">Halaman<select aria-label="Pilih halaman saham" value={page} disabled={loading} onChange={event => void loadScreener(Number(event.target.value))} className={inputClass}>{Array.from({ length: pageCount }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</select><span>dari {pageCount}</span></label>
+        <button disabled={loading || page >= pageCount} onClick={() => void loadScreener(page + 1)} className="rounded-lg border border-slate-200 px-4 py-2 font-semibold disabled:opacity-40">Berikutnya</button>
+        <p className="w-full text-xs text-slate-500">Hanya halaman yang dibuka dianalisis. Kembali ke halaman yang sudah dibuka memakai cache hingga 15 menit.</p>
+      </nav>
+      <section className="mt-7 grid gap-5 lg:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5"><h2 className="font-bold">Cara membaca setup</h2><p className="mt-3 text-sm leading-6 text-slate-600">Breakout menembus high 20 sesi dengan volume ≥1,5×. Pullback memantul dekat EMA20 di tren naik. Keduanya wajib lolos likuiditas, RSI, ATR, risiko harga ≤8%, dan R:R net ≥2.</p><p className="mt-3 text-xs leading-5 text-slate-500">Skor: tren 25 · momentum 15 · volume 15 · setup 20 · likuiditas 10 · risiko 15. Batas ini adalah hipotesis strategi yang perlu diuji, bukan hasil optimasi profit.</p></div>
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5"><h2 className="font-bold text-amber-950">Rencana berlaku untuk sesi berikutnya</h2><p className="mt-3 text-sm leading-6 text-amber-900">Entry hanya jika harga open berada dalam zona. Stop dan target aktif sejak entry; tidak perlu menunggu 3 sesi bila tersentuh. Mulai sesi ke-3, close di bawah EMA20 memicu exit pada open berikutnya. Batas waktu 15 sesi.</p><p className="mt-3 text-xs leading-5 text-amber-800">Yahoo Finance · kuotasi IDX tertunda sekitar 10 menit. Scan memakai candle harian selesai. Gap dan suspensi dapat menggagalkan stop. Berita, kalender libur, status papan dan kelengkapan penyesuaian split Yahoo belum terverifikasi independen. Turnover adalah estimasi close × volume saham.</p></div>
+      </section>
+      <section className="mt-7 rounded-2xl border border-slate-200 bg-white p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="font-bold">Uji aturan yang sama</h2><p className="mt-1 text-sm text-slate-500">Simulasi histori 2 tahun pada watchlist referensi terpisah (default 10 saham). Kandidat filter hari ini tidak dipakai untuk menghindari bias seleksi tambahan.</p></div><button disabled={testing || loading} onClick={() => void runBacktest()} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">{testing ? "Menghitung backtest…" : "Jalankan backtest"}</button></div>
+        {testError && <p role="alert" className="mt-4 text-sm text-rose-700">{testError}</p>}
+        {backtest && <div className="mt-5"><div className="grid gap-4 sm:grid-cols-4"><Metric label="Transaksi" value={String(backtest.summary.trades)} note={`${backtest.summary.from} – ${backtest.summary.to}`} /><Metric label="Win rate net" value={backtest.summary.trades ? `${(backtest.summary.winRate * 100).toFixed(1)}%` : "—"} note={`Rata-rata hold ${backtest.summary.averageHoldingSessions.toFixed(1)} sesi`} /><Metric label="Return portofolio" value={percent(backtest.summary.cumulativeNetReturn * 100)} note="Modal sama per saham, termasuk idle cash" /><Metric label="Max drawdown" value={percent(backtest.summary.maxDrawdown * 100)} note="Dari nilai portofolio harian" /></div><details className="mt-4 text-sm text-slate-600"><summary className="cursor-pointer font-semibold">Asumsi dan keterbatasan backtest</summary><ul className="mt-3 space-y-2">{backtest.assumptions.map((item) => <li key={item}>{item}</li>)}</ul></details></div>}
+      </section>
+      <p className="mt-7 pb-14 text-xs leading-5 text-slate-500">Screening edukatif; belum ada klaim edge atau peningkatan win rate yang tervalidasi. Estimasi biaya: beli 0,15%, jual 0,25%, slippage 0,10% per sisi. Sesuaikan dengan broker dan kondisi pasar.</p>
     </div>
-  );
+  </main>;
+}
+
+function StockDetail({ stock }: { stock: ScreenerStock }) {
+  const i = stock.indicators;
+  return <div className="grid gap-5 lg:grid-cols-3">
+    <div><h3 className="text-sm font-bold">Alasan & penghambat</h3><ul className="mt-3 space-y-2 text-xs leading-5">{stock.reasons.map((reason) => <li key={reason} className="text-emerald-800">✓ {reason}</li>)}{stock.warnings.map((warning) => <li key={warning} className="text-amber-900">• {warning}</li>)}</ul></div>
+    <div><h3 className="text-sm font-bold">Indikator swing</h3><dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs"><dt>SMA20 / SMA50</dt><dd>{fmt.format(i.sma20)} / {fmt.format(i.sma50)}</dd><dt>EMA20</dt><dd>{fmt.format(i.ema20)}</dd><dt>ATR14 / ATR%</dt><dd>{i.atr14.toFixed(1)} / {i.atrPercent.toFixed(2)}%</dd><dt>Jarak dari EMA20</dt><dd>{i.extensionAtr.toFixed(2)} ATR</dd><dt>Turnover rata-rata</dt><dd>{turnover(i.averageTurnover20)}</dd><dt>Turnover median</dt><dd>{turnover(i.medianTurnover20)}</dd><dt>Support / resistance 20</dt><dd>{fmt.format(i.support20)} / {fmt.format(i.resistance20)}</dd></dl></div>
+    <div><h3 className="text-sm font-bold">Rincian skor</h3><dl className="mt-3 grid grid-cols-2 gap-2 text-xs">{Object.entries(stock.scoreBreakdown).map(([label, value]) => <Fragment key={label}><dt className="capitalize">{label}</dt><dd className="font-semibold">{value}</dd></Fragment>)}</dl>{stock.eligible && stock.plan && <p className="mt-3 text-xs leading-5 text-slate-600">Risiko harga {stock.plan.riskPercent.toFixed(2)}% dari entry referensi {price(stock.plan.entry)}. Target {stock.plan.targetBasis === "resistance60" ? "dibatasi resistance historis" : "proyeksi 3R, bukan resistance yang teramati"}. Maksimal {stock.plan.maxHoldingSessions} sesi.</p>}<Link href={`/analysis?symbol=${encodeURIComponent(stock.symbol)}`} className="mt-4 inline-block text-xs font-semibold text-indigo-600">Analisis swing {stock.symbol} →</Link></div>
+  </div>;
+}
+
+function Metric({ label, value, note }: { label: string; value: string; note: string }) {
+  return <div className="rounded-2xl border border-slate-200 bg-white p-5"><p className="text-xs font-medium text-slate-500">{label}</p><p className="mt-2 text-2xl font-bold tracking-tight">{value}</p><p className="mt-2 text-xs leading-5 text-slate-500">{note}</p></div>;
 }
