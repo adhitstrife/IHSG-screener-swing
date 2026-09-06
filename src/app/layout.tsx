@@ -15,6 +15,36 @@ export default function RootLayout({
   return (
     <html lang="id">
       <body>
+        <header className="sticky top-0 z-50 border-b border-slate-200 bg-white shadow-sm">
+          <nav
+            aria-label="Navigasi utama"
+            className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-3"
+          >
+            <Link href="/" className="font-bold tracking-tight text-slate-900">
+              IDX Swing Screener
+            </Link>
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Link
+                href="/"
+                className="rounded-lg px-3 py-2 text-slate-700 transition hover:bg-slate-100 hover:text-indigo-700"
+              >
+                Screener
+              </Link>
+              <Link
+                href="/dividends"
+                className="rounded-lg bg-indigo-600 px-3 py-2 text-white shadow-sm transition hover:bg-indigo-700"
+              >
+                Dividen
+              </Link>
+              <Link
+                href="/analysis"
+                className="rounded-lg bg-slate-900 px-3 py-2 text-white shadow-sm transition hover:bg-slate-700"
+              >
+                ✦ Analisa AI
+              </Link>
+            </div>
+          </nav>
+        </header>
         {children}
         <aside
           aria-label="Peringatan risiko investasi"
@@ -30,20 +60,6 @@ export default function RootLayout({
             </p>
           </div>
         </aside>
-        <div className="fixed bottom-5 right-5 z-50 flex gap-2">
-          <Link
-            href="/dividends"
-            className="rounded-xl bg-white px-4 py-3 text-sm font-bold text-indigo-700 shadow-lg ring-1 ring-indigo-100 transition hover:bg-indigo-50"
-          >
-            Dividen
-          </Link>
-          <Link
-            href="/analysis"
-            className="rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white shadow-lg transition hover:bg-indigo-700"
-          >
-            ✦ Analisa AI
-          </Link>
-        </div>
         <Analytics />
       </body>
     </html>
