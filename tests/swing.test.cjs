@@ -43,6 +43,8 @@ test('breakout requires prior 20-session high, volume confirmation, close locati
   assert.equal(assessment.setup, 'breakout');
   assert.ok(assessment.indicators.closeLocation > 0.7);
   assert.ok(assessment.indicators.volumeRatio20 >= 1.5);
+  assert.ok(assessment.plan);
+  assert.ok(assessment.plan.target > assessment.plan.entryMax, 'target must exceed the highest executable entry price');
   const chased = breakout();
   chased.at(-1).close += assessment.indicators.atr14 * 3;
   chased.at(-1).high += assessment.indicators.atr14 * 3;

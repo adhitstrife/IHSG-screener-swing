@@ -1,7 +1,7 @@
 import type { MarketCandle } from "./market-data";
 
 /** All strategy thresholds live here so each component can be changed and backtested independently. */
-export const STRATEGY_VERSION = "swing-v3.1";
+export const STRATEGY_VERSION = "swing-v3.2";
 export const SWING_RULES = {
   minimumHistory: 120,
   minimumScore: 70,
@@ -151,11 +151,14 @@ export function evaluateSwing(candles: MarketCandle[], context: SwingContext = {
     const entry = roundPrice(latest.close, "up", latest.close);
     const stop = roundPrice(Math.min(entry - SWING_RULES.entry.stopAtr * atr14, Math.min(...candles.slice(-5).map((candle) => candle.low)) - SWING_RULES.entry.stopBufferAtr * atr14), "down", latest.close);
     const risk = entry - stop;
+    const entryMin = roundPrice(Math.max(stop + tickSize(latest.close), entry - SWING_RULES.entry.entryBandAtr * atr14), "up", latest.close);
+    const entryMax = roundPrice(entry + SWING_RULES.entry.entryBandAtr * atr14, "down", latest.close);
     // A resistance one tick above entry becomes the entry price after applying
-    // the safety tick, so it is not a tradable target. Continue to the next
-    // observed resistance rather than discarding an otherwise valid plan.
+    // the safety tick, so it is not a tradable target. A target also must be
+    // above the *top* of the allowed entry zone; otherwise a valid fill could
+    // open above its target. Continue to the next observed resistance.
     const targetTick = tickSize(latest.close);
-    const overhead = priorLong.map((candle) => candle.high).filter((high) => high - targetTick > entry);
+    const overhead = priorLong.map((candle) => candle.high).filter((high) => high - targetTick > entryMax);
     const hasHistoricalResistance = overhead.length > 0;
     const resistance = hasHistoricalResistance ? Math.min(...overhead) - targetTick : 0;
     const projected = entry + SWING_RULES.entry.projectedRewardRisk * risk;
@@ -163,9 +166,7 @@ export function evaluateSwing(candles: MarketCandle[], context: SwingContext = {
     // cannot be observed in the configured lookback.
     const targetBasis = hasHistoricalResistance ? "historical-resistance" : "projected-3R";
     const target = roundPrice(hasHistoricalResistance ? resistance : projected, "down", latest.close);
-    if (stop > 0 && stop < entry && target > entry) {
-      const entryMin = roundPrice(Math.max(stop + tickSize(latest.close), entry - SWING_RULES.entry.entryBandAtr * atr14), "up", latest.close);
-      const entryMax = roundPrice(entry + SWING_RULES.entry.entryBandAtr * atr14, "down", latest.close);
+    if (stop > 0 && stop < entry && target > entryMax) {
       plan = { entry, entryMin, entryMax, stop, target, riskPercent: risk / entry * 100, potentialRewardPercent: (target - entry) / entry * 100, netRewardRisk: netRewardRisk(entry, stop, target), maxHoldingSessions: SWING_RULES.maxHoldingSessions, targetBasis,
         targetConfidence: dataQuality.missingInRecent60 ? "reduced" : "high" };
     }
