@@ -28,6 +28,7 @@ Optional configuration:
 | `CRON_SECRET` | Bearer secret for the scheduled scan endpoint |
 | `YOGATHEDEV_AI_API_KEY` | Server-only AI provider key |
 | `YOGATHEDEV_AI_MODEL` | Existing configured model, default `deepseek-v4-flash` |
+| `TAVILY_API_KEY` | Optional server-only key for web research in `/analysis`; without it, AI uses Yahoo fundamental data only |
 
 Do not commit real credentials. Dynamic discovery is the default even if an old SCREENER_SYMBOLS value exists. The scanner requests Indonesian JKT equities using price/volume bands in Yahoo's custom POST screener, pages through **all** results (250 per page), then checks the exact turnover proxy and symbol/currency metadata. There is no fixed total-stock limit or silent fallback to ten stocks. The default Rp5 billion proxy is a loose preliminary filter, not the strategy's prior-20-session turnover calculation; recently liquid stocks can be missed and missing Yahoo volume fields are excluded with coverage counts. No market-cap or daily-gainer filter is imposed.
 
@@ -39,7 +40,7 @@ The custom adapter uses the pinned client's internal _fetch because its public s
 
 ## Swing rules
 
-`src/lib/swing-strategy.ts` defines the versioned rules (`swing-v1`). A high score alone never overrides a failed eligibility filter.
+`src/lib/swing-strategy.ts` defines the versioned rules (`swing-v2`). A high score alone never overrides a failed technical eligibility filter.
 
 - At least 60 completed daily candles. The scanner requests 240 calendar days of history, normalizes numeric fields, sorts dates, deduplicates matching candles and rejects inconsistent data.
 - Trend: close > SMA20 > SMA50, with SMA50 above its value five sessions earlier.
@@ -48,9 +49,9 @@ The custom adapter uses the pinned client's internal _fetch because its public s
 - Breakout: close above the preceding 20-session high, relative volume ≥1.5, and close in the top 35% of the candle.
 - Pullback: bullish recovery near EMA20 (within 1 ATR), low within 0.5 ATR above EMA20, close above the previous close, RSI 45–65, relative volume ≥0.8, and close in the top 40%.
 - Volatility: ATR14 between 1% and 6% of price; extension above EMA20 ≤2.5 ATR. ATR and RSI use Wilder smoothing. Recent close-to-close moves exceeding 35% require data/corporate-action review and block eligibility.
-- Risk: stop below the recent five-session low with a 0.25 ATR buffer, and at least 1.5 ATR from reference entry. Price risk must be ≤8%. This is a price-distance filter, not an account-risk or position-sizing recommendation.
+- Risk: stop is below the recent five-session low with a 0.25 ATR buffer and at least 1.5 ATR from reference entry. Price risk, potential reward and net R:R are calculated and displayed; they are not hard-coded eligibility filters.
 - Target: the lower of a 3R projection and the nearest overhead high in the prior 59 candles, less a tick. A 3R projection is a planning assumption, not an observed resistance level. Nearby resistance is never ignored to manufacture a favorable R:R.
-- Net reward-to-risk must be ≥2 after assumed buy fee 0.15%, sell fee 0.25%, and slippage 0.10% per side. Indicative levels use the signal close's regular-market price fraction; check the applicable trading-day tick before placing orders.
+- Net R:R includes assumed buy fee 0.15%, sell fee 0.25%, and slippage 0.10% per side. The dashboard starts with a user-selectable 1:1.5 filter; it can be changed without recalculating the technical snapshot. Indicative levels use the signal close's regular-market price fraction; check the applicable trading-day tick before placing orders.
 
 The score totals 100: trend 25, momentum 15, volume 15, setup 20, liquidity 10, risk 15. Default eligibility requires ≥70 plus every mandatory filter. These are explicit strategy hypotheses, not profit-optimized or out-of-sample-validated settings.
 
@@ -60,7 +61,7 @@ The signal uses completed candles only. Entry is modeled at the next session's o
 
 Stop and target are active from entry. Starting on holding session 3, a close below EMA20 triggers exit on the following open. Otherwise exit at the close of holding session 15. Gap stops can execute below the intended stop price.
 
-The AI explains the same indicators and filters. It cannot activate a rejected setup or replace the engine's entry/stop/target levels. AI context contains Yahoo daily OHLCV and the same computed indicators. Broker accumulation, foreign flows and news are not connected, and no placeholder flow values are fabricated.
+The AI explains the same indicators and filters. It cannot activate a rejected setup or replace the engine's entry/stop/target levels. Its context includes Yahoo daily OHLCV plus Yahoo annual revenue, net income, diluted EPS and market capitalization. With `TAVILY_API_KEY`, it also receives a bounded set of recent web-search snippets and source links. Web snippets are treated as untrusted evidence, not instructions; when web search is unavailable, the result explicitly says so. Broker accumulation and foreign flows are not fabricated.
 
 ## Data quality and storage
 
