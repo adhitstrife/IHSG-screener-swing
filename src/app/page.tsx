@@ -47,14 +47,16 @@ export default function Home() {
       if (!response.ok) {
         throw new Error(payload.error ?? "Gagal memuat halaman saham.");
       }
-      setSnapshot(payload); setPage(1); setPageCount(Math.max(1, Math.ceil(payload.data.length / 10)));
+      setSnapshot(payload);
+      if (!(payload.meta && "refreshing" in payload.meta && payload.meta.refreshing)) setPage(1);
+      setPageCount(Math.max(1, Math.ceil(payload.data.length / 10)));
       setRefreshing(Boolean(payload.meta && "refreshing" in payload.meta && payload.meta.refreshing));
       setRefreshProgress(payload.meta && "progress" in payload.meta ? payload.meta.progress as RefreshProgress | undefined : undefined);
     } catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Gagal memuat halaman saham."); }
     finally { if (scanRequest.current === controller) setLoading(false); }
   }, []);
   useEffect(() => { const timer = window.setTimeout(() => { void loadScreener(); }, 0); return () => { window.clearTimeout(timer); scanRequest.current?.abort(); }; }, [loadScreener]);
-  useEffect(() => { if (!refreshing) return; const timer = window.setInterval(() => { void loadScreener(); }, 4000); return () => window.clearInterval(timer); }, [refreshing, loadScreener]);
+  useEffect(() => { if (!refreshing) return; const timer = window.setInterval(() => { void loadScreener(); }, 3000); return () => window.clearInterval(timer); }, [refreshing, loadScreener]);
 
   const results = useMemo(() => {
     const rows = (snapshot?.data ?? []).filter((stock) => `${stock.symbol} ${stock.name}`.toLowerCase().includes(query.trim().toLowerCase()) && stock.score >= minimumScore && (!onlyEligible || stock.eligible) && (setup === "all" || stock.setup === setup));

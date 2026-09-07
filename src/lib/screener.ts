@@ -76,6 +76,7 @@ export function createScreenerService(loadHistory = getDailyHistory, universe: U
 }
 
 const batchServices = new Map<string, ReturnType<typeof createScreenerService>>();
+// Keep each on-demand request bounded so it completes reliably on serverless.
 export const SCAN_BATCH_SIZE = 3;
 
 export async function getScreenerBatch(offset = 0, expectedId?: string, force = false): Promise<ScreenerSnapshot> {

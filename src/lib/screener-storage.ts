@@ -18,7 +18,13 @@ function getAdminClient() {
 
 export function isStorageConfigured() { return Boolean(getAdminClient()); }
 
-export type ScreenerRefreshProgress = { processed: number; total: number; updatedAt: string };
+export type ScreenerRefreshProgress = {
+  processed: number;
+  total: number;
+  updatedAt: string;
+  nextOffset?: number;
+  universeId?: string;
+};
 
 const pageKey = (universeId: string, page: number) => `${cacheKey()}:page-v1:${universeId}:${page}`;
 
@@ -37,7 +43,7 @@ export async function saveScreenerPage(snapshot: ScreenerSnapshot) {
   const client = getAdminClient();
   if (!client || !snapshot.meta.universeId || !snapshot.meta.page) return false;
   const { error } = await client.from("swing_screening_runs").insert({ cache_key: pageKey(snapshot.meta.universeId, snapshot.meta.page), strategy_version: STRATEGY_VERSION, generated_at: snapshot.meta.generatedAt, snapshot });
-  if (error) throw new Error("Cache halaman belum tersimpan. Periksa konfigurasi Supabase.");
+  if (error) throw new Error(`Cache halaman belum tersimpan: ${error.message}`);
   return true;
 }
 
@@ -48,7 +54,7 @@ export async function saveScreenerRun(snapshot: ScreenerSnapshot, supabase = get
     if (!snapshot.meta.universeId) return false;
     const batchKey = `${cacheKey()}:batch:${snapshot.meta.universeId}`;
     const { error } = await supabase.from("swing_screening_runs").insert({ cache_key: batchKey, strategy_version: STRATEGY_VERSION, generated_at: snapshot.meta.generatedAt, snapshot });
-    if (error) throw new Error("Batch belum tersimpan. Periksa migrasi swing_screening_runs dan konfigurasi Supabase.");
+    if (error) throw new Error(`Batch belum tersimpan: ${error.message}`);
     if (snapshot.meta.nextOffset != null) return false;
     // Server-created batches can be joined across serverless instances. Never accept
     // client-submitted scores, and never publish an incomplete run as the full cache.
@@ -57,7 +63,7 @@ export async function saveScreenerRun(snapshot: ScreenerSnapshot, supabase = get
       const { data, error: readError } = await supabase.from("swing_screening_runs").select("snapshot")
         .eq("cache_key", batchKey).gte("generated_at", new Date(Date.now() - CACHE_TTL_MS).toISOString())
         .order("generated_at", { ascending: false }).range(offset, offset + 499);
-      if (readError) throw new Error("Batch tersimpan, tetapi penggabungan riwayat gagal.");
+      if (readError) throw new Error(`Batch tersimpan, tetapi penggabungan riwayat gagal: ${readError.message}`);
       for (const row of data ?? []) {
         const batch = row.snapshot as ScreenerSnapshot;
         const index = batch.meta.batchOffset;
@@ -81,7 +87,7 @@ export async function saveScreenerRun(snapshot: ScreenerSnapshot, supabase = get
     cache_key: cacheKey(), strategy_version: STRATEGY_VERSION,
     generated_at: snapshot.meta.generatedAt, snapshot,
   });
-  if (error) throw new Error("Riwayat swing belum tersimpan. Periksa migrasi swing_screening_runs dan konfigurasi Supabase.");
+  if (error) throw new Error(`Riwayat swing belum tersimpan: ${error.message}`);
   return true;
 }
 
@@ -112,9 +118,16 @@ export async function getLatestScreenerRefreshProgress(): Promise<ScreenerRefres
   const latest = data[0].snapshot as ScreenerSnapshot;
   const universeId = latest?.meta?.universeId;
   if (!universeId || !Number.isSafeInteger(latest.meta.universeSize)) return undefined;
-  const processed = Math.max(...data.map((row) => {
-    const batch = row.snapshot as ScreenerSnapshot;
-    return batch.meta.universeId === universeId && Number.isSafeInteger(batch.meta.processedSize) ? batch.meta.processedSize! : 0;
+  const progressBatches = data.map((row) => row.snapshot as ScreenerSnapshot).filter((batch) => batch.meta.universeId === universeId && Number.isSafeInteger(batch.meta.processedSize));
+  const processed = Math.max(...progressBatches.map((batch) => {
+    return batch.meta.processedSize!;
   }));
-  return processed > 0 ? { processed, total: latest.meta.universeSize, updatedAt: data[0].generated_at } : undefined;
+  const latestBatch = progressBatches.find((batch) => batch.meta.processedSize === processed);
+  return processed > 0 ? {
+    processed,
+    total: latest.meta.universeSize,
+    updatedAt: data[0].generated_at,
+    nextOffset: latestBatch?.meta.nextOffset ?? undefined,
+    universeId,
+  } : undefined;
 }
