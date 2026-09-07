@@ -83,7 +83,7 @@ export async function saveScreenerRun(snapshot: ScreenerSnapshot, supabase = get
   return true;
 }
 
-export async function getLatestStoredScreenerRun(): Promise<ScreenerSnapshot | undefined> {
+export async function getLatestStoredScreenerRun(allowStale = false): Promise<ScreenerSnapshot | undefined> {
   const supabase = getAdminClient();
   if (!supabase) return undefined;
   const { data: run, error } = await supabase.from("swing_screening_runs")
@@ -95,6 +95,6 @@ export async function getLatestStoredScreenerRun(): Promise<ScreenerSnapshot | u
   if (snapshot?.meta?.strategyVersion !== STRATEGY_VERSION || !Array.isArray(snapshot.data) || !Array.isArray(snapshot.meta.failures) || snapshot.meta.nextOffset != null || !snapshot.meta.universeId) return undefined;
   if (snapshot.meta.dataVersion !== YAHOO_DATA_VERSION || snapshot.meta.priceBasis !== YAHOO_PRICE_BASIS) return undefined;
   if (snapshot.data.some((stock) => stock.strategyVersion !== STRATEGY_VERSION || !stock.indicators || !Array.isArray(stock.warnings))) return undefined;
-  if (!isCurrentDailyScreenerRun(run.generated_at)) return undefined;
+  if (!allowStale && !isCurrentDailyScreenerRun(run.generated_at)) return undefined;
   return { data: snapshot.data, meta: { ...snapshot.meta, source: "Yahoo Finance · Supabase cache" } };
 }

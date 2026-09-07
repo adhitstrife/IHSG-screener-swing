@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { getScreenerBatch, SCAN_BATCH_SIZE } from "@/lib/screener";
 import { isStorageConfigured, saveScreenerRun } from "@/lib/screener-storage";
 
@@ -28,7 +29,17 @@ async function run(request: Request, input: BatchRequest) {
     const { offset, universeId } = parseBatch(input);
     const snapshot = await getScreenerBatch(offset, universeId, offset === 0);
     const published = await saveScreenerRun(snapshot);
-    return NextResponse.json({ success: true, published, batch: { offset, size: snapshot.data.length + snapshot.meta.failures.length, nextOffset: snapshot.meta.nextOffset ?? null, universeId: snapshot.meta.universeId, universeSize: snapshot.meta.universeSize }, stocks: snapshot.data.length, failures: snapshot.meta.failures.length });
+    const nextOffset = snapshot.meta.nextOffset ?? null;
+    const nextUniverseId = snapshot.meta.universeId;
+    if (nextOffset !== null && nextUniverseId && process.env.CRON_SECRET) {
+      const origin = new URL(request.url).origin;
+      after(async () => {
+        try {
+          await fetch(`${origin}/api/cron/screener`, { method: "POST", headers: { authorization: `Bearer ${process.env.CRON_SECRET}`, "content-type": "application/json" }, body: JSON.stringify({ offset: nextOffset, universeId: nextUniverseId }), cache: "no-store" });
+        } catch (error) { console.error("Screener batch continuation failed", error); }
+      });
+    }
+    return NextResponse.json({ success: true, published, batch: { offset, size: snapshot.data.length + snapshot.meta.failures.length, nextOffset, universeId: nextUniverseId, universeSize: snapshot.meta.universeSize }, stocks: snapshot.data.length, failures: snapshot.meta.failures.length });
   } catch (error) {
     console.error("Screener batch failed", error);
     return NextResponse.json({ error: error instanceof Error ? error.message : "Scheduler gagal menjalankan screening." }, { status: 502 });
