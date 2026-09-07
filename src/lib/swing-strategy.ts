@@ -18,7 +18,13 @@ export const SWING_RULES = {
   slippage: 0.001,
   lookback: { trendFast: 20, trendSlow: 50, rsi: 14, atr: 14, momentum: 20, breakout: 20, slope: 10 },
   setup: { breakoutVolumeRatio: 1.5, breakoutCloseLocation: 0.7, pullbackTouchAtr: 0.5, pullbackMaxBelowEmaAtr: 0.5 },
-  entry: { idealExtensionAtr: 1.5, cautionExtensionAtr: 2, chaseExtensionAtr: 2.5, maxRiskPercent: 10, minimumRewardRisk: 1.5 },
+  entry: {
+    nearEmaAtr: 0.5, healthyExtensionAtr: 1, idealExtensionAtr: 1.5, cautionExtensionAtr: 2, chaseExtensionAtr: 2.5,
+    tightRiskPercent: 5, normalRiskPercent: 8, maxRiskPercent: 10,
+    minimumRewardRisk: 1.5, goodRewardRisk: 2, greatRewardRisk: 3,
+    weakRsi: 45, healthyRsiMin: 50, healthyRsiMax: 60, strongRsiMin: 60, strongRsiMax: 65, extendedRsi: 70,
+    stopAtr: 1.5, stopBufferAtr: 0.25, entryBandAtr: 0.5, projectedRewardRisk: 3,
+  },
   weights: {
     setup: { trend: 25, structure: 20, volume: 15, momentum: 15, relativeStrength: 10, liquidity: 10, marketRegime: 5 },
     entry: { extension: 25, risk: 20, rewardRisk: 20, momentum: 15, breakoutPosition: 10, candle: 10 },
@@ -143,48 +149,48 @@ export function evaluateSwing(candles: MarketCandle[], context: SwingContext = {
   let plan: SwingPlan | null = null;
   if (setup !== "watch" && atr14 > 0) {
     const entry = roundPrice(latest.close, "up", latest.close);
-    const stop = roundPrice(Math.min(entry - 1.5 * atr14, Math.min(...candles.slice(-5).map((candle) => candle.low)) - 0.25 * atr14), "down", latest.close);
+    const stop = roundPrice(Math.min(entry - SWING_RULES.entry.stopAtr * atr14, Math.min(...candles.slice(-5).map((candle) => candle.low)) - SWING_RULES.entry.stopBufferAtr * atr14), "down", latest.close);
     const risk = entry - stop;
     const overhead = priorLong.map((candle) => candle.high).filter((high) => high > entry);
     const hasHistoricalResistance = overhead.length > 0;
     const resistance = hasHistoricalResistance ? Math.min(...overhead) - tickSize(latest.close) : 0;
-    const projected = entry + 3 * risk;
+    const projected = entry + SWING_RULES.entry.projectedRewardRisk * risk;
     // A projected 3R target is only permitted when historical overhead supply
     // cannot be observed in the configured lookback.
     const targetBasis = hasHistoricalResistance ? "historical-resistance" : "projected-3R";
     const target = roundPrice(hasHistoricalResistance ? resistance : projected, "down", latest.close);
     if (stop > 0 && stop < entry && target > entry) {
-      const entryMin = roundPrice(Math.max(stop + tickSize(latest.close), entry - 0.5 * atr14), "up", latest.close);
-      const entryMax = roundPrice(entry + 0.5 * atr14, "down", latest.close);
+      const entryMin = roundPrice(Math.max(stop + tickSize(latest.close), entry - SWING_RULES.entry.entryBandAtr * atr14), "up", latest.close);
+      const entryMax = roundPrice(entry + SWING_RULES.entry.entryBandAtr * atr14, "down", latest.close);
       plan = { entry, entryMin, entryMax, stop, target, riskPercent: risk / entry * 100, potentialRewardPercent: (target - entry) / entry * 100, netRewardRisk: netRewardRisk(entry, stop, target), maxHoldingSessions: SWING_RULES.maxHoldingSessions, targetBasis,
         targetConfidence: dataQuality.missingInRecent60 ? "reduced" : "high" };
     }
   }
   const w = SWING_RULES.weights;
   const setupBreakdown = {
-    trend: (latest.close > sma20 ? 8 : 0) + (sma20 > sma50 ? 9 : 0) + (indicators.sma50SlopePercent > 0 ? 8 : 0),
-    structure: setup === "breakout" ? 20 : setup === "pullback" ? 18 : 0,
-    volume: indicators.volumeRatio20 >= 1.5 ? 15 : indicators.volumeRatio20 >= 1 ? 10 : indicators.volumeRatio20 >= 0.8 ? 5 : 0,
-    momentum: rsi14 >= 60 && rsi14 <= 65 ? 15 : rsi14 >= 50 && rsi14 < 60 ? 12 : rsi14 > 65 && rsi14 <= 70 ? 12 : rsi14 > 70 ? 7 : rsi14 >= 45 && indicators.momentum20 > 0 ? 6 : 0,
-    relativeStrength: market.relativeStrength === null ? 5 : market.relativeStrength >= 5 ? 10 : market.relativeStrength >= 0 ? 7 : market.relativeStrength >= -3 ? 3 : 0,
-    liquidity: liquid ? 10 : 0,
-    marketRegime: market.regime === "bullish" ? 5 : market.regime === "neutral" || market.regime === "unavailable" ? 3 : 0,
+    trend: (latest.close > sma20 ? w.setup.trend * 0.32 : 0) + (sma20 > sma50 ? w.setup.trend * 0.36 : 0) + (indicators.sma50SlopePercent > 0 ? w.setup.trend * 0.32 : 0),
+    structure: setup === "breakout" ? w.setup.structure : setup === "pullback" ? w.setup.structure * 0.9 : 0,
+    volume: indicators.volumeRatio20 >= SWING_RULES.setup.breakoutVolumeRatio ? w.setup.volume : indicators.volumeRatio20 >= 1 ? w.setup.volume * 2 / 3 : indicators.volumeRatio20 >= 0.8 ? w.setup.volume / 3 : 0,
+    momentum: rsi14 >= SWING_RULES.entry.strongRsiMin && rsi14 <= SWING_RULES.entry.strongRsiMax ? w.setup.momentum : rsi14 >= SWING_RULES.entry.healthyRsiMin && rsi14 < SWING_RULES.entry.strongRsiMin ? w.setup.momentum * 0.8 : rsi14 > SWING_RULES.entry.strongRsiMax && rsi14 <= SWING_RULES.entry.extendedRsi ? w.setup.momentum * 0.8 : rsi14 > SWING_RULES.entry.extendedRsi ? w.setup.momentum * 0.47 : rsi14 >= SWING_RULES.entry.weakRsi && indicators.momentum20 > 0 ? w.setup.momentum * 0.4 : 0,
+    relativeStrength: market.relativeStrength === null ? w.setup.relativeStrength / 2 : market.relativeStrength >= 5 ? w.setup.relativeStrength : market.relativeStrength >= 0 ? w.setup.relativeStrength * 0.7 : market.relativeStrength >= -3 ? w.setup.relativeStrength * 0.3 : 0,
+    liquidity: liquid ? w.setup.liquidity : 0,
+    marketRegime: market.regime === "bullish" ? w.setup.marketRegime : market.regime === "neutral" || market.regime === "unavailable" ? w.setup.marketRegime * 0.6 : 0,
   };
   const extension = indicators.extensionAtr;
   const entryBreakdown = {
-    extension: extension <= 0.5 ? 22 : extension <= 1 ? 25 : extension <= SWING_RULES.entry.idealExtensionAtr ? 23 : extension <= SWING_RULES.entry.cautionExtensionAtr ? 15 : extension <= SWING_RULES.entry.chaseExtensionAtr ? 7 : 0,
-    risk: !plan ? 0 : plan.riskPercent <= 5 ? 20 : plan.riskPercent <= 8 ? 16 : plan.riskPercent <= 10 ? 10 : 3,
-    rewardRisk: !plan ? 0 : plan.netRewardRisk >= 3 ? 20 : plan.netRewardRisk >= 2 ? 17 : plan.netRewardRisk >= SWING_RULES.entry.minimumRewardRisk ? 14 : plan.netRewardRisk >= 1 ? 7 : 0,
-    momentum: rsi14 >= 50 && rsi14 <= 65 ? 15 : rsi14 > 65 && rsi14 <= 70 ? 10 : rsi14 > 70 ? 4 : rsi14 >= 45 ? 8 : 0,
-    breakoutPosition: setup === "breakout" ? (extension <= 1.5 ? 10 : extension <= 2 ? 6 : 0) : setup === "pullback" ? 10 : 0,
-    candle: closeLocation >= 0.7 ? 10 : closeLocation >= 0.55 ? 6 : 2,
+    extension: extension <= SWING_RULES.entry.nearEmaAtr ? w.entry.extension * 0.88 : extension <= SWING_RULES.entry.healthyExtensionAtr ? w.entry.extension : extension <= SWING_RULES.entry.idealExtensionAtr ? w.entry.extension * 0.92 : extension <= SWING_RULES.entry.cautionExtensionAtr ? w.entry.extension * 0.6 : extension <= SWING_RULES.entry.chaseExtensionAtr ? w.entry.extension * 0.28 : 0,
+    risk: !plan ? 0 : plan.riskPercent <= SWING_RULES.entry.tightRiskPercent ? w.entry.risk : plan.riskPercent <= SWING_RULES.entry.normalRiskPercent ? w.entry.risk * 0.8 : plan.riskPercent <= SWING_RULES.entry.maxRiskPercent ? w.entry.risk / 2 : w.entry.risk * 0.15,
+    rewardRisk: !plan ? 0 : plan.netRewardRisk >= SWING_RULES.entry.greatRewardRisk ? w.entry.rewardRisk : plan.netRewardRisk >= SWING_RULES.entry.goodRewardRisk ? w.entry.rewardRisk * 0.85 : plan.netRewardRisk >= SWING_RULES.entry.minimumRewardRisk ? w.entry.rewardRisk * 0.7 : plan.netRewardRisk >= 1 ? w.entry.rewardRisk * 0.35 : 0,
+    momentum: rsi14 >= SWING_RULES.entry.healthyRsiMin && rsi14 <= SWING_RULES.entry.strongRsiMax ? w.entry.momentum : rsi14 > SWING_RULES.entry.strongRsiMax && rsi14 <= SWING_RULES.entry.extendedRsi ? w.entry.momentum * 2 / 3 : rsi14 > SWING_RULES.entry.extendedRsi ? w.entry.momentum * 0.27 : rsi14 >= SWING_RULES.entry.weakRsi ? w.entry.momentum * 0.53 : 0,
+    breakoutPosition: setup === "breakout" ? (extension <= SWING_RULES.entry.idealExtensionAtr ? w.entry.breakoutPosition : extension <= SWING_RULES.entry.cautionExtensionAtr ? w.entry.breakoutPosition * 0.6 : 0) : setup === "pullback" ? w.entry.breakoutPosition : 0,
+    candle: closeLocation >= SWING_RULES.setup.breakoutCloseLocation ? w.entry.candle : closeLocation >= 0.55 ? w.entry.candle * 0.6 : w.entry.candle * 0.2,
   };
   let setupQuality = Object.values(setupBreakdown).reduce((sum, value) => sum + value, 0);
   let entryQuality = Object.values(entryBreakdown).reduce((sum, value) => sum + value, 0);
   if (dataQuality.missingRate > SWING_RULES.maximumMissingRate) { setupQuality = Math.min(setupQuality, 60); entryQuality = Math.min(entryQuality, 60); }
   if (dataQuality.missingInRecent20) entryQuality = Math.min(entryQuality, 75);
   if (dataQuality.missingInRecent60) setupQuality = Math.min(setupQuality, 85);
-  if (rsi14 > 70) entryQuality = Math.min(entryQuality, 75);
+  if (rsi14 > SWING_RULES.entry.extendedRsi) entryQuality = Math.min(entryQuality, 75);
   if (extension > 2) entryQuality = Math.min(entryQuality, 70);
   if (extension > 2.5) entryQuality = Math.min(entryQuality, 55);
   if (plan && plan.riskPercent > SWING_RULES.entry.maxRiskPercent) entryQuality = Math.min(entryQuality, 70);
@@ -197,7 +203,7 @@ export function evaluateSwing(candles: MarketCandle[], context: SwingContext = {
   if (setup === "breakout") reasons.push("Breakout high 20 sesi sebelumnya dengan volume dan penutupan dekat high.");
   else if (setup === "pullback") reasons.push("Pullback sehat di EMA20 dengan candle konfirmasi bullish.");
   else warnings.push("Belum ada breakout atau pullback EMA20 yang terkonfirmasi.");
-  if (rsi14 > 70) warnings.push(`RSI ${rsi14.toFixed(1)} sudah overextended; entry quality diturunkan.`); else if (rsi14 >= 65) warnings.push(`RSI ${rsi14.toFixed(1)} kuat namun mulai extended.`);
+  if (rsi14 > SWING_RULES.entry.extendedRsi) warnings.push(`RSI ${rsi14.toFixed(1)} sudah overextended; entry quality diturunkan.`); else if (rsi14 >= SWING_RULES.entry.strongRsiMax) warnings.push(`RSI ${rsi14.toFixed(1)} kuat namun mulai extended.`);
   if (extension > 2.5) warnings.push(`Harga ${extension.toFixed(2)} ATR di atas EMA20: sangat berisiko dikejar.`); else if (extension > 2) warnings.push(`Harga ${extension.toFixed(2)} ATR di atas EMA20: chase risk.`); else if (extension > 1.5) warnings.push(`Harga ${extension.toFixed(2)} ATR di atas EMA20: mulai extended.`);
   if (plan?.riskPercent && plan.riskPercent > SWING_RULES.entry.maxRiskPercent) warnings.push(`Risk ${plan.riskPercent.toFixed(1)}% melebihi batas referensi ${SWING_RULES.entry.maxRiskPercent}%.`);
   if (plan?.targetBasis === "projected-3R") warnings.push("Target memakai proyeksi 3R karena resistance historis valid tidak ditemukan.");
