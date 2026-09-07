@@ -19,14 +19,18 @@ export type StockAnalysisContext = {
 
 export async function getStockAnalysisContext(symbol: string): Promise<StockAnalysisContext> {
   const to = new Date();
-  const from = new Date(to); from.setDate(from.getDate() - 240);
+  const from = new Date(to); from.setDate(from.getDate() - 360);
   const format = (date: Date) => date.toISOString().slice(0, 10);
-  const [history, research] = await Promise.all([getDailyHistory(symbol, format(from), format(to)), getFundamentalAndWebResearch(symbol)]);
+  const [history, benchmark, research] = await Promise.all([
+    getDailyHistory(symbol, format(from), format(to)),
+    getDailyHistory("^JKSE", format(from), format(to)).catch(() => undefined),
+    getFundamentalAndWebResearch(symbol),
+  ]);
   const candles = history.candles;
   const latest = candles.at(-1); const previous = candles.at(-2);
   if (!latest || !previous) throw new Error(`Data harga ${symbol} belum cukup.`);
   const range = latest.high - latest.low;
-  const swing = evaluateSwing(candles);
+  const swing = evaluateSwing(candles, { benchmarkCandles: benchmark?.candles, dataQuality: history.quality });
   const stale = weekdayAge(latest.date, to) > 3;
   if (stale) { swing.eligible = false; swing.warnings.push("Candle tertinggal >3 hari kerja; periksa hari libur bursa dan data provider."); }
   swing.warnings.push(...history.warnings);

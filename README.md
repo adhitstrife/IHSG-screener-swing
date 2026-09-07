@@ -40,20 +40,19 @@ The custom adapter uses the pinned client's internal _fetch because its public s
 
 ## Swing rules
 
-`src/lib/swing-strategy.ts` defines the versioned rules (`swing-v2`). A high score alone never overrides a failed technical eligibility filter.
+`src/lib/swing-strategy.ts` defines the versioned rules (`swing-v3`) in one configuration object. A high Setup Quality alone never makes an extended or high-risk entry actionable.
 
-- At least 60 completed daily candles. The scanner requests 240 calendar days of history, normalizes numeric fields, sorts dates, deduplicates matching candles and rejects inconsistent data.
-- Trend: close > SMA20 > SMA50, with SMA50 above its value five sessions earlier.
-- Momentum: 20-session return >0 and Wilder RSI14 between 45 and 75.
-- Liquidity: prior 20-session average turnover ≥Rp10 billion, median ≥Rp5 billion, at least 18 active candles, and positive signal-day volume. Turnover is the proxy close × shares, not reported traded value. Today's spike does not enter the baseline.
-- Breakout: close above the preceding 20-session high, relative volume ≥1.5, and close in the top 35% of the candle.
-- Pullback: bullish recovery near EMA20 (within 1 ATR), low within 0.5 ATR above EMA20, close above the previous close, RSI 45–65, relative volume ≥0.8, and close in the top 40%.
-- Volatility: ATR14 between 1% and 6% of price; extension above EMA20 ≤2.5 ATR. ATR and RSI use Wilder smoothing. Recent close-to-close moves exceeding 35% require data/corporate-action review and block eligibility.
-- Risk: stop is below the recent five-session low with a 0.25 ATR buffer and at least 1.5 ATR from reference entry. Price risk, potential reward and net R:R are calculated and displayed; they are not hard-coded eligibility filters.
-- Target: the lower of a 3R projection and the nearest overhead high in the prior 59 candles, less a tick. A 3R projection is a planning assumption, not an observed resistance level. Nearby resistance is never ignored to manufacture a favorable R:R.
-- Net R:R includes assumed buy fee 0.15%, sell fee 0.25%, and slippage 0.10% per side. The dashboard starts with a user-selectable 1:1.5 filter; it can be changed without recalculating the technical snapshot. Indicative levels use the signal close's regular-market price fraction; check the applicable trading-day tick before placing orders.
+- At least 120 valid completed daily sessions. The scanner requests 360 calendar days, normally yielding roughly 120–250 sessions. Missing OHLC or null-volume bars are skipped and tracked; zero-volume bars remain sessions and are penalized by liquidity rules.
+- Trend: close > SMA20 > SMA50 and a positive 10-session SMA50 slope.
+- Relative strength: 20-session stock return minus IHSG 20-session return. IHSG is classified bullish, neutral, or bearish from its own SMA20/SMA50 structure.
+- Liquidity: prior 20-session average turnover ≥Rp10 billion, median ≥Rp5 billion, at least 18 positive-volume sessions, and positive signal-day volume. Average/median share volume and turnover are reported separately.
+- Breakout: close above the **previous** 20-session high, volume ratio ≥1.5, close location ≥0.70, bullish trend, valid liquidity, and no excessive EMA20 extension.
+- Pullback: a bullish recovery at EMA20 in an uptrend, with a contained pullback low and volume no larger than the preceding bullish impulse baseline.
+- Entry Quality uses EMA20 extension in ATR, technical price risk, net R:R, RSI state, position relative to the breakout, and close location. RSI above 70 and an extension above 2 ATR reduce Entry Quality rather than automatically rejecting a stock.
+- Target: nearest overhead historical high observed across up to 220 sessions. A 3R target is used only where no valid resistance exists and is labelled `Projected 3R`; it is never presented as a resistance target.
+- Net R:R includes assumed buy fee 0.15%, sell fee 0.25%, and slippage 0.10% per side. The dashboard starts with a user-selectable 1:1.5 filter; it can be changed without recalculating the technical snapshot.
 
-The score totals 100: trend 25, momentum 15, volume 15, setup 20, liquidity 10, risk 15. Default eligibility requires ≥70 plus every mandatory filter. These are explicit strategy hypotheses, not profit-optimized or out-of-sample-validated settings.
+Setup Quality totals 100: trend 25, structure 20, volume 15, momentum 15, relative strength 10, liquidity 10, market regime 5. Entry Quality totals 100: extension 25, risk 20, R:R 20, RSI/short-term momentum 15, breakout position 10, candle quality 10. Overall = Setup Quality ×60% + Entry Quality ×40%. Missing data, RSI above 70, extension above 2 ATR, risk above 10%, and weak data quality cap the relevant score.
 
 ## Entry and exits
 
@@ -67,7 +66,7 @@ The AI explains the same indicators and filters. It cannot activate a rejected s
 
 - Source: Yahoo Finance via the pinned server-side `yahoo-finance2` client. Four-letter symbols map to `.JK`; metadata must confirm IDX/Jakarta, IDR and daily granularity. Yahoo lists an approximately 10-minute IDX quote delay.
 - Current-day candles are excluded until 16:30 Asia/Jakarta (a conservative post-close publication buffer). Requests use an inclusive date range translated to Yahoo's exclusive `period2`; timestamps are mapped to Jakarta trading dates.
-- Yahoo sometimes emits all-null holiday bars. Rows with all four OHLC values null and null/zero volume are skipped with a coverage note, never counted as sessions or forward-filled. Partially missing completed bars and conflicting duplicate sessions are rejected.
+- Yahoo bars with missing OHLC or null volume are skipped with data-quality counters; they are never counted as sessions or forward-filled. A valid OHLC bar with volume zero is retained and marked as an illiquid session. Conflicting duplicate sessions are rejected.
 - OHLC and share volume retain Yahoo's split-adjusted basis. Split events are recorded for context; ratios are not applied a second time. Dividend-adjusted `adjclose` is not mixed into OHLC or displayed as a tradable entry/stop/target. The backtest measures price return after trading costs, excluding cash dividends. Yahoo adjustments are not independently audited.
 - A date lagging the newest successful symbol or older than three weekdays is ineligible. Weekdays are a heuristic: there is no IDX holiday calendar or benchmark feed.
 - A failed symbol produces an explicit coverage warning while valid symbols remain visible. Access denial (401/403) and rate limits (429) stop further requests. All-history failures are reported; valid zero-candidate queries return an empty result.

@@ -1,4 +1,4 @@
-function candles(length = 80) {
+function candles(length = 140) {
   const end = new Date(); end.setUTCDate(end.getUTCDate() - 1);
   return Array.from({ length }, (_, i) => {
     const date = new Date(end); date.setUTCDate(date.getUTCDate() - length + 1 + i);

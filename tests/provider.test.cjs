@@ -8,7 +8,7 @@ const universe = ['FAIL', 'LATE', 'GOOD'].map((symbol) => ({ symbol, name: symbo
 
 test('scan coalesces refreshes, isolates symbol failures, excludes stale candidates, and preserves source timestamps', async () => {
   let calls = 0;
-  const rows = candles(90);
+  const rows = candles(140);
   const service = createScreenerService(async (symbol, from, to) => {
     calls++;
     if (symbol === 'FAIL') throw new Error('Invalid history');

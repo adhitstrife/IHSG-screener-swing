@@ -11,7 +11,9 @@ test('AI receives Yahoo technical and fundamental data, cannot override rejected
   process.env.YOGATHEDEV_AI_API_KEY = 'fixture-only';
   process.env.TAVILY_API_KEY = 'fixture-search';
   const rows = candles();
-  rows[79] = { ...rows[79], close: 1200, open: 1160, high: 1205, low: 1155, volume: 60_000_000 };
+  const last = rows.length - 1;
+  const priorHigh = Math.max(...rows.slice(-21, -1).map((row) => row.high));
+  rows[last] = { ...rows[last], close: priorHigh + 5, open: priorHigh - 13, high: priorHigh + 8, low: priorHigh - 17, volume: 60_000_000 };
   let yahooCalls = 0; let aiCalls = 0;
   global.fetch = async (input) => {
     const url = String(input);
@@ -51,7 +53,7 @@ test('AI receives Yahoo technical and fundamental data, cannot override rejected
     assert.equal(rejected.levels.buyTarget, null);
     assert.equal(rejected.levels.cutLoss, null);
     assert.equal(rejected.levels.sellTarget, null);
-    assert.equal(yahooCalls, 2); assert.equal(aiCalls, 2);
+    assert.equal(yahooCalls, 3); assert.equal(aiCalls, 2);
   } finally {
     global.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.YOGATHEDEV_AI_API_KEY; else process.env.YOGATHEDEV_AI_API_KEY = originalKey;

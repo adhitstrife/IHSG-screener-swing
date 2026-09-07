@@ -14,11 +14,13 @@ export type DailyHistory = {
   priceBasis: string;
   fetchedAt: string;
   splits: { date: string; ratio: string }[];
+  quality: { validBars: number; skippedBars: number; missingRate: number; missingInRecent20: boolean; missingInRecent60: boolean; zeroVolumeSessions: number };
   warnings: string[];
 };
 
 export function toYahooSymbol(symbol: string) {
   const normalized = symbol.trim().toUpperCase().replace(/\.JK$/, "");
+  if (normalized === "^JKSE") return normalized;
   if (!/^[A-Z]{4}$/.test(normalized)) throw new Error("Masukkan kode saham IDX 4 huruf, misalnya BBCA atau BBCA.JK.");
   return `${normalized}.JK`;
 }
@@ -53,16 +55,15 @@ export function normalizeYahooChart(chart: YahooDailyChart, symbol: string, from
   if (meta?.symbol !== yahooSymbol || meta.currency !== "IDR" || meta.exchangeName !== "JKT" || meta.exchangeTimezoneName !== "Asia/Jakarta" || meta.dataGranularity !== "1d") throw new Error(`Metadata Yahoo ${yahooSymbol} bukan candle harian saham IDX dalam Rupiah.`);
   if (!Array.isArray(chart.quotes)) throw new Error(`Histori Yahoo ${yahooSymbol} tidak tersedia.`);
   const clock = jakartaClock(now);
-  const emptyDates: string[] = [];
+  const skippedDates: string[] = [];
   const rows = chart.quotes.flatMap((quote) => {
     if (!(quote.date instanceof Date) || !Number.isFinite(quote.date.getTime())) throw new Error(`Timestamp Yahoo ${yahooSymbol} tidak valid.`);
     const date = jakartaClock(quote.date).date;
     if (date < from || date > to || date > clock.date || (date === clock.date && clock.minutes < 990)) return [];
-    // Yahoo emits all-null bars on some IDX holidays, including weekdays.
-    // They are not trading sessions. Partially missing OHLC or positive volume
-    // without prices still fail validation instead of being silently dropped.
-    if ([quote.open, quote.high, quote.low, quote.close].every((value) => value === null) && (quote.volume === null || quote.volume === 0)) {
-      emptyDates.push(date);
+    // Missing OHLC is never a trading session. A null volume is invalid too;
+    // preserve the gap for quality scoring instead of corrupting indicators.
+    if ([quote.open, quote.high, quote.low, quote.close].some((value) => value === null) || quote.volume === null) {
+      skippedDates.push(date);
       return [];
     }
     return [{ date, open: quote.open, high: quote.high, low: quote.low, close: quote.close, volume: quote.volume }];
@@ -73,12 +74,22 @@ export function normalizeYahooChart(chart: YahooDailyChart, symbol: string, from
     if (!(split.date instanceof Date) || !Number.isFinite(split.date.getTime()) || !Number.isFinite(split.numerator) || !Number.isFinite(split.denominator) || split.numerator <= 0 || split.denominator <= 0) throw new Error(`Data split Yahoo ${yahooSymbol} tidak valid.`);
     return { date: jakartaClock(split.date).date, ratio: `${split.numerator}:${split.denominator}` };
   }).filter((split) => split.date >= from && split.date <= candles.at(-1)!.date);
+  const latestDate = candles.at(-1)!.date;
+  const newerValidBars = (date: string) => candles.filter((candle) => candle.date > date && candle.date <= latestDate).length;
+  const quality = {
+    validBars: candles.length, skippedBars: skippedDates.length, missingRate: skippedDates.length / Math.max(1, candles.length + skippedDates.length),
+    missingInRecent20: skippedDates.some((date) => newerValidBars(date) < 20),
+    missingInRecent60: skippedDates.some((date) => newerValidBars(date) < 60),
+    zeroVolumeSessions: candles.filter((candle) => candle.volume === 0).length,
+  };
   return {
-    symbol: yahooSymbol.slice(0, -3), yahooSymbol, candles, source: YAHOO_SOURCE,
+    symbol: yahooSymbol === "^JKSE" ? yahooSymbol : yahooSymbol.slice(0, -3), yahooSymbol, candles, source: YAHOO_SOURCE,
     dataVersion: YAHOO_DATA_VERSION, priceBasis: YAHOO_PRICE_BASIS, fetchedAt: now.toISOString(), splits,
     warnings: [
       ...(splits.length ? ["Histori memuat stock split; OHLCV memakai penyesuaian split Yahoo, tanpa penyesuaian ulang."] : []),
-      ...(emptyDates.length ? [`${emptyDates.length} bar Yahoo tanpa harga/volume dilewati (libur atau tidak ada data); tidak dihitung sebagai sesi.`] : []),
+      ...(skippedDates.length ? [`${skippedDates.length} bar Yahoo dengan OHLC/volume hilang dilewati; tidak dihitung sebagai sesi.`] : []),
+      ...(quality.zeroVolumeSessions ? [`${quality.zeroVolumeSessions} sesi volume nol dipertahankan sebagai sesi tetapi akan memengaruhi filter likuiditas.`] : []),
     ],
+    quality,
   };
 }

@@ -41,11 +41,11 @@ export function simulateSwingTrade(candles: MarketCandle[], signalIndex: number,
   return undefined;
 }
 
-export function calculateSwingTrades(symbol: string, candles: MarketCandle[], minimumScore = SWING_RULES.minimumScore as number) {
+export function calculateSwingTrades(symbol: string, candles: MarketCandle[], minimumScore = SWING_RULES.minimumScore as number, benchmarkCandles?: MarketCandle[]) {
   const trades: SwingTrade[] = [];
   // Reserve the complete holding window. No fabricated end-of-data liquidations.
   for (let i = SWING_RULES.minimumHistory - 1; i < candles.length - SWING_RULES.maxHoldingSessions; i++) {
-    const signal = evaluateSwing(candles.slice(0, i + 1));
+    const signal = evaluateSwing(candles.slice(0, i + 1), { benchmarkCandles: benchmarkCandles?.filter((bar) => bar.date <= candles[i].date) });
     if (!signal.eligible || signal.score < minimumScore || !signal.plan) continue;
     const trade = simulateSwingTrade(candles, i, signal.plan, symbol);
     if (!trade) {

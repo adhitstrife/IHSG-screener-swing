@@ -7,7 +7,8 @@ const { candles, chart } = require('./yahoo-fixtures.cjs');
 test('IDX suffix is normalized once, and other exchanges/URL-like symbols are rejected', () => {
   assert.equal(toYahooSymbol(' bbca '), 'BBCA.JK');
   assert.equal(toYahooSymbol('bbca.jk'), 'BBCA.JK');
-  for (const symbol of ['BBCA.US', 'BBCA.JK.JK', '^JKSE', '../BBCA', '']) assert.throws(() => toYahooSymbol(symbol));
+  assert.equal(toYahooSymbol('^JKSE'), '^JKSE');
+  for (const symbol of ['BBCA.US', 'BBCA.JK.JK', '../BBCA', '']) assert.throws(() => toYahooSymbol(symbol));
 });
 
 test('inclusive Jakarta ranges include the full final trading date and reject invalid dates', () => {
@@ -37,9 +38,10 @@ test('timestamps map to Jakarta session dates and partial current bars are exclu
   data.quotes.push({ date: new Date('2026-09-03T18:00:00Z'), open: null, high: null, low: null, close: null, volume: null });
   const result = normalizeYahooChart(data, 'TEST', '2026-08-01', '2026-09-04', new Date('2026-09-04T09:29:00Z'));
   assert.equal(result.candles.length, 8);
-  // A partly filled completed bar must fail, unlike an entirely empty holiday bar.
+  // A partly filled completed bar is skipped and recorded for data-quality scoring.
   data.quotes.at(-1).close = 1000;
-  assert.throws(() => normalizeYahooChart(data, 'TEST', '2026-08-01', '2026-09-04', new Date('2026-09-04T09:30:00Z')), /tidak valid/);
+  const skipped = normalizeYahooChart(data, 'TEST', '2026-08-01', '2026-09-04', new Date('2026-09-04T09:30:00Z'));
+  assert.equal(skipped.quality.skippedBars, 1);
 });
 
 test('Yahoo all-null weekday holiday placeholders are skipped without creating artificial sessions', () => {
@@ -51,7 +53,7 @@ test('Yahoo all-null weekday holiday placeholders are skipped without creating a
   assert.equal(result.candles.some((candle) => candle.date === rows[3].date), false);
   assert.match(result.warnings[0], /bar Yahoo/);
   data.quotes[3].volume = 1000;
-  assert.throws(() => normalizeYahooChart(data, 'TEST', rows[0].date, rows.at(-1).date));
+  assert.equal(normalizeYahooChart(data, 'TEST', rows[0].date, rows.at(-1).date).quality.skippedBars, 1);
 });
 
 test('wrong currency/exchange, null completed OHLC and conflicting sessions cannot produce signals', () => {
@@ -61,7 +63,7 @@ test('wrong currency/exchange, null completed OHLC and conflicting sessions cann
     assert.throws(() => normalizeYahooChart(data, 'TEST', rows[0].date, rows.at(-1).date), /Metadata/);
   }
   const data = chart(rows); data.quotes[0].close = null;
-  assert.throws(() => normalizeYahooChart(data, 'TEST', rows[0].date, rows.at(-1).date));
+  assert.equal(normalizeYahooChart(data, 'TEST', rows[0].date, rows.at(-1).date).quality.skippedBars, 1);
   const duplicate = chart(rows); duplicate.quotes.push({ ...duplicate.quotes[0], close: duplicate.quotes[0].close + 1 });
   assert.throws(() => normalizeYahooChart(duplicate, 'TEST', rows[0].date, rows.at(-1).date), /duplikat/);
 });

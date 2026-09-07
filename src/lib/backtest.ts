@@ -21,12 +21,13 @@ export async function runBacktest(force = false): Promise<BacktestResult> {
 async function executeBacktest(force: boolean): Promise<BacktestResult> {
   const now = new Date(); const from = new Date(now); from.setUTCFullYear(from.getUTCFullYear() - 2);
   const iso = (date: Date) => date.toISOString().slice(0, 10);
+  const benchmark = await getDailyHistory("^JKSE", iso(from), iso(now), force).catch(() => undefined);
   const series = [];
   const stocks: BacktestStock[] = [];
   for (const stock of backtestUniverse) {
     const { candles } = await getDailyHistory(stock.symbol, iso(from), iso(now), force);
     if (candles.length < SWING_RULES.minimumHistory + SWING_RULES.maxHoldingSessions + 1) throw new Error(`Histori ${stock.symbol} tidak cukup untuk backtest swing.`);
-    const trades = calculateSwingTrades(stock.symbol, candles);
+    const trades = calculateSwingTrades(stock.symbol, candles, SWING_RULES.minimumScore, benchmark?.candles);
     series.push({ candles, trades });
     stocks.push({ ...stock, trades: trades.length, winRate: trades.length ? trades.filter((trade) => trade.netReturn > 0).length / trades.length : 0, averageNetReturn: mean(trades.map((trade) => trade.netReturn)) });
   }

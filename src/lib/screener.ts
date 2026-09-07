@@ -27,14 +27,19 @@ function formatVolume(volume: number) {
 }
 
 /** Provider boundary keeps strategy scoring independent from Yahoo's request format. */
-export function createScreenerService(loadHistory = getDailyHistory, universe: UniverseStock[] | ((force?: boolean) => Promise<CandidateUniverse>) = getCandidateUniverse, allowFailedBatch = false, concurrency = 1) {
+export function createScreenerService(loadHistory = getDailyHistory, universe: UniverseStock[] | ((force?: boolean) => Promise<CandidateUniverse>) = getCandidateUniverse, allowFailedBatch = false, concurrency = 1, loadBenchmark: typeof getDailyHistory | undefined = loadHistory === getDailyHistory ? getDailyHistory : undefined) {
   let cached: ScreenerSnapshot | undefined;
   let pending: Promise<ScreenerSnapshot> | undefined;
 
   async function scanUniverse(force: boolean): Promise<ScreenerSnapshot> {
     const candidates = typeof universe === "function" ? await universe(force) : undefined;
     const stocks = candidates?.stocks ?? universe as UniverseStock[];
-    const now = new Date(); const from = new Date(now); from.setUTCDate(from.getUTCDate() - 240);
+    const now = new Date(); const from = new Date(now); from.setUTCDate(from.getUTCDate() - 360);
+    // One benchmark request is shared by every stock in this scan; its cache is
+    // also reused by subsequent page/batch requests in the same server instance.
+    let ihsg: Awaited<ReturnType<typeof getDailyHistory>> | undefined;
+    try { ihsg = loadBenchmark ? await loadBenchmark("^JKSE", from.toISOString().slice(0, 10), now.toISOString().slice(0, 10), force) : undefined; }
+    catch { /* A missing benchmark reduces context only; stock scan remains available. */ }
     const results: ScreenerStock[] = [];
     const failures: ScreenerSnapshot["meta"]["failures"] = [];
     let cursor = 0;
@@ -45,7 +50,7 @@ export function createScreenerService(loadHistory = getDailyHistory, universe: U
       try {
         const history = await loadHistory(stock.symbol, from.toISOString().slice(0, 10), now.toISOString().slice(0, 10), force);
         const candles = history.candles;
-        const assessment = evaluateSwing(candles);
+        const assessment = evaluateSwing(candles, { benchmarkCandles: ihsg?.candles, dataQuality: history.quality });
         const latest = candles.at(-1)!; const previous = candles.at(-2)!;
         results.push({ ...stock, ...assessment, warnings: [...assessment.warnings, ...history.warnings], price: latest.close, change: (latest.close / previous.close - 1) * 100, volume: formatVolume(latest.volume), asOf: latest.date, stale: weekdayAge(latest.date, now) > 3 });
       } catch (error) {
