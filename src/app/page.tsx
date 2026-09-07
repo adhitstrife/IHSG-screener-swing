@@ -10,6 +10,7 @@ const price = (value: number) => `Rp${fmt.format(value)}`;
 const percent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 const turnover = (value: number) => `Rp${(value / 1_000_000_000).toFixed(1)} M`;
 const inputClass = "rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100";
+type RefreshProgress = { processed: number; total: number; updatedAt: string };
 
 export default function Home() {
   const scanRequest = useRef<AbortController | null>(null);
@@ -22,6 +23,8 @@ export default function Home() {
   const [sort, setSort] = useState("score");
   const [snapshot, setSnapshot] = useState<ScreenerSnapshot>();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshProgress, setRefreshProgress] = useState<RefreshProgress>();
   const [error, setError] = useState<string>();
   const [expanded, setExpanded] = useState<string>();
   const [backtest, setBacktest] = useState<BacktestResult>();
@@ -33,19 +36,25 @@ export default function Home() {
     const controller = new AbortController();
     scanRequest.current = controller;
     setExpanded(undefined); setError(undefined);
-    setSnapshot(undefined); setLoading(true);
+    setLoading(true);
     try {
       const response = await fetch("/api/screener", { cache: "no-store", signal: controller.signal });
-      const payload = await response.json() as ScreenerSnapshot & { error?: string };
+      const payload = await response.json() as (ScreenerSnapshot & { error?: string; refreshing?: boolean; progress?: RefreshProgress });
       if (controller.signal.aborted) return;
+      if (response.status === 202) {
+        setRefreshing(Boolean(payload.refreshing)); setRefreshProgress(payload.progress); return;
+      }
       if (!response.ok) {
         throw new Error(payload.error ?? "Gagal memuat halaman saham.");
       }
       setSnapshot(payload); setPage(1); setPageCount(Math.max(1, Math.ceil(payload.data.length / 10)));
+      setRefreshing(Boolean(payload.meta && "refreshing" in payload.meta && payload.meta.refreshing));
+      setRefreshProgress(payload.meta && "progress" in payload.meta ? payload.meta.progress as RefreshProgress | undefined : undefined);
     } catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Gagal memuat halaman saham."); }
     finally { if (scanRequest.current === controller) setLoading(false); }
   }, []);
   useEffect(() => { const timer = window.setTimeout(() => { void loadScreener(); }, 0); return () => { window.clearTimeout(timer); scanRequest.current?.abort(); }; }, [loadScreener]);
+  useEffect(() => { if (!refreshing) return; const timer = window.setInterval(() => { void loadScreener(); }, 4000); return () => window.clearInterval(timer); }, [refreshing, loadScreener]);
 
   const results = useMemo(() => {
     const rows = (snapshot?.data ?? []).filter((stock) => `${stock.symbol} ${stock.name}`.toLowerCase().includes(query.trim().toLowerCase()) && stock.score >= minimumScore && (!onlyEligible || stock.eligible) && (setup === "all" || stock.setup === setup));
@@ -87,6 +96,7 @@ export default function Home() {
       </section>
       {snapshot?.meta.candidateFilter && <p className="mb-4 text-sm text-slate-600">{snapshot.meta.candidateSource}: {snapshot.meta.candidateFilter}. Cakupan adalah kandidat filter, bukan seluruh BEI.</p>}
       {loading && <p role="status" className="mb-4 text-sm text-indigo-700">Memuat snapshot scan harian dari penyimpanan…</p>}
+      {refreshing && <RefreshStatus progress={refreshProgress} />}
       {error && <p role="alert" className="mb-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</p>}
       {scanWarnings.length > 0 && <details className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><summary className="cursor-pointer font-semibold">Scan memiliki {scanWarnings.length} catatan cakupan / penyimpanan</summary><ul className="mt-3 space-y-2">{scanWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
       <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -98,7 +108,7 @@ export default function Home() {
           <label className="flex cursor-pointer items-center gap-2 py-2 text-sm text-slate-600"><input checked={onlyEligible} onChange={(event) => setOnlyEligible(event.target.checked)} type="checkbox" className="h-4 w-4 accent-indigo-600" /> Hanya setup lolos</label>
         </div>
       </section>
-      <section aria-busy={loading} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <section aria-busy={loading || refreshing} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4"><div><h2 className="font-bold">Watchlist swing</h2><p className="mt-1 text-xs leading-5 text-slate-500">Hasil scan harian diurutkan dan difilter untuk seluruh kandidat sebelum dibagi 10 saham per halaman.</p></div><span className="shrink-0 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{results.length} saham</span></div>
         <div className="overflow-x-auto"><table className="w-full min-w-[1050px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr>{["Saham / harga", "Setup", "Tren 20 sesi", "RVOL / RSI", "Zona entry", "Stop / target", "R:R net", "Skor", ""].map((title) => <th key={title} className="px-4 py-3 font-semibold">{title}</th>)}</tr></thead>
           <tbody className="divide-y divide-slate-100">{pageRows.map((stock) => <Fragment key={stock.symbol}><tr className="transition hover:bg-slate-50">
@@ -147,4 +157,14 @@ function StockDetail({ stock }: { stock: ScreenerStock }) {
 
 function Metric({ label, value, note }: { label: string; value: string; note: string }) {
   return <div className="rounded-2xl border border-slate-200 bg-white p-5"><p className="text-xs font-medium text-slate-500">{label}</p><p className="mt-2 text-2xl font-bold tracking-tight">{value}</p><p className="mt-2 text-xs leading-5 text-slate-500">{note}</p></div>;
+}
+
+function RefreshStatus({ progress, compact = false }: { progress?: RefreshProgress; compact?: boolean }) {
+  const percent = progress?.total ? Math.min(100, Math.round(progress.processed / progress.total * 100)) : 0;
+  return <div role="status" className={compact ? "mx-auto max-w-md text-center" : "mb-5 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-indigo-950"}>
+    <p className="text-sm font-bold">Memperbarui scan Yahoo Finance</p>
+    <p className="mt-1 text-xs leading-5 text-indigo-800">{progress ? `${progress.processed} dari ${progress.total} kandidat telah diproses. Halaman akan memperbarui otomatis setelah selesai.` : "Menyiapkan kandidat untuk scan. Halaman akan memperbarui otomatis."}</p>
+    <div className="mt-3 h-2 overflow-hidden rounded-full bg-indigo-100"><div className="h-full rounded-full bg-indigo-600 transition-all duration-500" style={{ width: `${percent}%` }} /></div>
+    <p className="mt-1 text-right text-xs font-semibold text-indigo-700">{progress ? `${percent}%` : "Memulai…"}</p>
+  </div>;
 }

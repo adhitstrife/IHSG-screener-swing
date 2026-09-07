@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { after } from "next/server";
-import { getLatestStoredScreenerRun, isStorageConfigured } from "@/lib/screener-storage";
+import { getLatestScreenerRefreshProgress, getLatestStoredScreenerRun, isStorageConfigured } from "@/lib/screener-storage";
 
 export const runtime = "nodejs";
 export const maxDuration = 240;
@@ -14,8 +14,9 @@ export async function GET(request: Request) {
     const current = await getLatestStoredScreenerRun();
     if (current) return NextResponse.json(current, { headers });
     const stale = await getLatestStoredScreenerRun(true);
+    const progress = await getLatestScreenerRefreshProgress();
     const secret = process.env.CRON_SECRET;
-    if (secret) {
+    if (secret && !progress) {
       const origin = new URL(request.url).origin;
       after(async () => {
         try {
@@ -23,8 +24,8 @@ export async function GET(request: Request) {
         } catch (error) { console.error("On-demand screener refresh failed", error); }
       });
     }
-    if (!stale) return NextResponse.json({ error: "Hasil scan pertama sedang dibuat. Muat ulang halaman beberapa saat lagi.", refreshing: Boolean(secret) }, { status: 503, headers });
-    return NextResponse.json({ ...stale, meta: { ...stale.meta, refreshing: Boolean(secret), refreshMessage: "Menampilkan hasil sesi sebelumnya sambil memperbarui data Yahoo Finance." } }, { headers });
+    if (!stale) return NextResponse.json({ refreshing: Boolean(secret), progress, message: "Scan pertama sedang berjalan." }, { status: 202, headers });
+    return NextResponse.json({ ...stale, meta: { ...stale.meta, refreshing: Boolean(secret), progress, refreshMessage: "Menampilkan hasil sesi sebelumnya sambil memperbarui data Yahoo Finance." } }, { headers });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Gagal mengambil hasil screener." }, { status: 502, headers });
   }

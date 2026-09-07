@@ -18,6 +18,8 @@ function getAdminClient() {
 
 export function isStorageConfigured() { return Boolean(getAdminClient()); }
 
+export type ScreenerRefreshProgress = { processed: number; total: number; updatedAt: string };
+
 const pageKey = (universeId: string, page: number) => `${cacheKey()}:page-v1:${universeId}:${page}`;
 
 export async function getStoredScreenerPage(universeId: string, page: number): Promise<ScreenerSnapshot | undefined> {
@@ -97,4 +99,22 @@ export async function getLatestStoredScreenerRun(allowStale = false): Promise<Sc
   if (snapshot.data.some((stock) => stock.strategyVersion !== STRATEGY_VERSION || !stock.indicators || !Array.isArray(stock.warnings))) return undefined;
   if (!allowStale && !isCurrentDailyScreenerRun(run.generated_at)) return undefined;
   return { data: snapshot.data, meta: { ...snapshot.meta, source: "Yahoo Finance · Supabase cache" } };
+}
+
+export async function getLatestScreenerRefreshProgress(): Promise<ScreenerRefreshProgress | undefined> {
+  const supabase = getAdminClient();
+  if (!supabase) return undefined;
+  const { data, error } = await supabase.from("swing_screening_runs").select("snapshot, generated_at")
+    .like("cache_key", `${cacheKey()}:batch:%`)
+    .gte("generated_at", new Date(Date.now() - CACHE_TTL_MS).toISOString())
+    .order("generated_at", { ascending: false }).limit(100);
+  if (error || !data?.length) return undefined;
+  const latest = data[0].snapshot as ScreenerSnapshot;
+  const universeId = latest?.meta?.universeId;
+  if (!universeId || !Number.isSafeInteger(latest.meta.universeSize)) return undefined;
+  const processed = Math.max(...data.map((row) => {
+    const batch = row.snapshot as ScreenerSnapshot;
+    return batch.meta.universeId === universeId && Number.isSafeInteger(batch.meta.processedSize) ? batch.meta.processedSize! : 0;
+  }));
+  return processed > 0 ? { processed, total: latest.meta.universeSize, updatedAt: data[0].generated_at } : undefined;
 }
