@@ -32,13 +32,15 @@ export default function RootLayout({
               </Link>
               <Link
                 href="/dividends"
-                className="rounded-lg bg-indigo-600 px-3 py-2 text-white shadow-sm transition hover:bg-indigo-700"
+                className="rounded-lg px-3 py-2 text-white shadow-sm transition"
+                style={{ backgroundColor: "#4f46e5" }}
               >
                 Dividen
               </Link>
               <Link
                 href="/analysis"
-                className="rounded-lg bg-slate-900 px-3 py-2 text-white shadow-sm transition hover:bg-slate-700"
+                className="rounded-lg px-3 py-2 text-white shadow-sm transition"
+                style={{ backgroundColor: "#0f172a" }}
               >
                 ✦ Analisa AI
               </Link>
