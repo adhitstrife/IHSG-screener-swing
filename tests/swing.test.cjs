@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { evaluateSwing, wilderIndicators, netRewardRisk, tickSize, roundPrice } = require('../.test-build/swing-strategy');
-const { normalizeDailyCandles, completedDailyCandles, weekdayAge, isFreshSnapshot } = require('../.test-build/market-data');
+const { normalizeDailyCandles, completedDailyCandles, weekdayAge, isCurrentDailyScreenerRun, isFreshSnapshot } = require('../.test-build/market-data');
 const { simulateSwingTrade, calculateSwingTrades, portfolioMetrics } = require('../.test-build/swing-backtest');
 
 function candle(date, close, extra = {}) {
@@ -56,6 +56,13 @@ test('snapshot expiry cannot cross the daily publication cutoff or accept future
   assert.equal(isFreshSnapshot('2026-09-04T09:40:00Z', now), false);
   assert.equal(isFreshSnapshot('invalid', now), false);
   assert.equal(isFreshSnapshot('2026-09-04T09:30:00Z', new Date('2026-09-04T09:45:00Z')), false);
+});
+
+test('daily screener run stays available until the next completed weekday session', () => {
+  assert.equal(isCurrentDailyScreenerRun('2026-09-04T10:00:00Z', new Date('2026-09-05T02:00:00Z')), true);
+  assert.equal(isCurrentDailyScreenerRun('2026-09-04T10:00:00Z', new Date('2026-09-07T02:00:00Z')), true);
+  assert.equal(isCurrentDailyScreenerRun('2026-09-04T10:00:00Z', new Date('2026-09-07T10:00:00Z')), false);
+  assert.equal(isCurrentDailyScreenerRun('2026-09-07T10:00:00Z', new Date('2026-09-07T10:30:00Z')), true);
 });
 
 test('a pullback with nearby overhead supply is rejected even with a high setup score', () => {

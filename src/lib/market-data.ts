@@ -31,6 +31,19 @@ export function isFreshSnapshot(generatedAt: string, now = new Date()) {
   return current.date === generated.date && !(current.minutes >= 990 && generated.minutes < 990);
 }
 
+/** A daily screener run stays valid until the next completed weekday session.
+ * This intentionally outlives the short-lived in-process Yahoo cache. */
+export function isCurrentDailyScreenerRun(generatedAt: string, now = new Date()) {
+  const generated = new Date(generatedAt);
+  if (!Number.isFinite(generated.getTime()) || generated > now) return false;
+  const current = jakartaClock(now);
+  const expected = new Date(`${current.date}T00:00:00Z`);
+  if (current.minutes < 16 * 60 + 30 || expected.getUTCDay() === 0 || expected.getUTCDay() === 6) {
+    do expected.setUTCDate(expected.getUTCDate() - 1); while (expected.getUTCDay() === 0 || expected.getUTCDay() === 6);
+  }
+  return jakartaClock(generated).date === expected.toISOString().slice(0, 10);
+}
+
 /** Weekdays only: exchange holidays are deliberately not guessed. */
 export function weekdayAge(date: string, now = new Date()) {
   const end = jakartaClock(now).date;

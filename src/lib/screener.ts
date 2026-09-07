@@ -99,7 +99,8 @@ export async function getScreenerBatch(offset = 0, expectedId?: string, force = 
   } };
 }
 
-export const getScreenerSnapshot = createScreenerService();
+// Full daily runs use Yahoo's bounded three-request queue and are persisted atomically.
+export const getScreenerSnapshot = createScreenerService(getDailyHistory, getCandidateUniverse, false, 3);
 
 export const SCAN_PAGE_SIZE = 10;
 export class CandidatePageChangedError extends Error {}

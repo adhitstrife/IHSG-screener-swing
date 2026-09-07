@@ -3,7 +3,7 @@ import type { ScreenerSnapshot } from "./screener";
 import { universeConfig } from "./yahoo-universe";
 import { YAHOO_DATA_VERSION, YAHOO_PRICE_BASIS } from "./yahoo-data";
 import { STRATEGY_VERSION } from "./swing-strategy";
-import { isFreshSnapshot } from "./market-data";
+import { isCurrentDailyScreenerRun, isFreshSnapshot } from "./market-data";
 import { mergeScanBatch } from "./screener-results";
 
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -88,7 +88,6 @@ export async function getLatestStoredScreenerRun(): Promise<ScreenerSnapshot | u
   if (!supabase) return undefined;
   const { data: run, error } = await supabase.from("swing_screening_runs")
     .select("snapshot, generated_at").eq("cache_key", cacheKey())
-    .gte("generated_at", new Date(Date.now() - CACHE_TTL_MS).toISOString())
     .lte("generated_at", new Date().toISOString())
     .order("generated_at", { ascending: false }).limit(1).maybeSingle();
   if (error || !run) return undefined;
@@ -96,6 +95,6 @@ export async function getLatestStoredScreenerRun(): Promise<ScreenerSnapshot | u
   if (snapshot?.meta?.strategyVersion !== STRATEGY_VERSION || !Array.isArray(snapshot.data) || !Array.isArray(snapshot.meta.failures) || snapshot.meta.nextOffset != null || !snapshot.meta.universeId) return undefined;
   if (snapshot.meta.dataVersion !== YAHOO_DATA_VERSION || snapshot.meta.priceBasis !== YAHOO_PRICE_BASIS) return undefined;
   if (snapshot.data.some((stock) => stock.strategyVersion !== STRATEGY_VERSION || !stock.indicators || !Array.isArray(stock.warnings))) return undefined;
-  if (!isFreshSnapshot(run.generated_at)) return undefined;
+  if (!isCurrentDailyScreenerRun(run.generated_at)) return undefined;
   return { data: snapshot.data, meta: { ...snapshot.meta, source: "Yahoo Finance · Supabase cache" } };
 }
