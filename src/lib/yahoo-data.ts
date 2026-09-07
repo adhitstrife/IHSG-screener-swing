@@ -63,7 +63,10 @@ export function normalizeYahooChart(chart: YahooDailyChart, symbol: string, from
     // Missing OHLC is never a trading session. A null volume is invalid too;
     // preserve the gap for quality scoring instead of corrupting indicators.
     if ([quote.open, quote.high, quote.low, quote.close].some((value) => value === null) || quote.volume === null) {
-      skippedDates.push(date);
+      // Yahoo may publish null placeholders for weekends. They are never IDX
+      // sessions and must not lower data confidence.
+      const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+      if (weekday !== 0 && weekday !== 6) skippedDates.push(date);
       return [];
     }
     return [{ date, open: quote.open, high: quote.high, low: quote.low, close: quote.close, volume: quote.volume }];

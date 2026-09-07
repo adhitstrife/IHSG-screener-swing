@@ -1,7 +1,7 @@
 import type { MarketCandle } from "./market-data";
 
 /** All strategy thresholds live here so each component can be changed and backtested independently. */
-export const STRATEGY_VERSION = "swing-v3";
+export const STRATEGY_VERSION = "swing-v3.1";
 export const SWING_RULES = {
   minimumHistory: 120,
   minimumScore: 70,
@@ -151,9 +151,13 @@ export function evaluateSwing(candles: MarketCandle[], context: SwingContext = {
     const entry = roundPrice(latest.close, "up", latest.close);
     const stop = roundPrice(Math.min(entry - SWING_RULES.entry.stopAtr * atr14, Math.min(...candles.slice(-5).map((candle) => candle.low)) - SWING_RULES.entry.stopBufferAtr * atr14), "down", latest.close);
     const risk = entry - stop;
-    const overhead = priorLong.map((candle) => candle.high).filter((high) => high > entry);
+    // A resistance one tick above entry becomes the entry price after applying
+    // the safety tick, so it is not a tradable target. Continue to the next
+    // observed resistance rather than discarding an otherwise valid plan.
+    const targetTick = tickSize(latest.close);
+    const overhead = priorLong.map((candle) => candle.high).filter((high) => high - targetTick > entry);
     const hasHistoricalResistance = overhead.length > 0;
-    const resistance = hasHistoricalResistance ? Math.min(...overhead) - tickSize(latest.close) : 0;
+    const resistance = hasHistoricalResistance ? Math.min(...overhead) - targetTick : 0;
     const projected = entry + SWING_RULES.entry.projectedRewardRisk * risk;
     // A projected 3R target is only permitted when historical overhead supply
     // cannot be observed in the configured lookback.
