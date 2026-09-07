@@ -1,10 +1,9 @@
 import type { MarketCandle } from "./market-data";
 
-export const STRATEGY_VERSION = "swing-v1";
+export const STRATEGY_VERSION = "swing-v2";
 export const SWING_RULES = {
   minimumHistory: 60, minimumScore: 70, maxHoldingSessions: 15,
   minAverageTurnover: 10_000_000_000, minMedianTurnover: 5_000_000_000,
-  minNetRewardRisk: 2, maxRiskPercent: 8,
   buyFee: 0.0015, sellFee: 0.0025, slippage: 0.001,
 } as const;
 
@@ -17,7 +16,7 @@ export type SwingIndicators = {
 };
 export type SwingPlan = {
   entry: number; entryMin: number; entryMax: number; stop: number; target: number;
-  riskPercent: number; netRewardRisk: number; maxHoldingSessions: number;
+  riskPercent: number; potentialRewardPercent: number; netRewardRisk: number; maxHoldingSessions: number;
   targetBasis: "resistance60" | "3R projection";
 };
 export type SwingAssessment = {
@@ -108,22 +107,17 @@ export function evaluateSwing(candles: MarketCandle[]): SwingAssessment {
     if (stop > 0 && stop < entry && target > entry) {
       // The same next-open entry band is used by the simulator and the dashboard.
       const entryMin = roundPrice(Math.max(stop + tickSize(latest.close), entry - 0.5 * atr14), "up", latest.close);
-      const costFactor = (1 + SWING_RULES.slippage) * (1 + SWING_RULES.buyFee);
-      const sellFactor = (1 - SWING_RULES.slippage) * (1 - SWING_RULES.sellFee);
-      const maxForRR = sellFactor * (target + SWING_RULES.minNetRewardRisk * stop) / ((SWING_RULES.minNetRewardRisk + 1) * costFactor);
-      const maxForRisk = stop / (1 - SWING_RULES.maxRiskPercent / 100);
-      const entryMax = roundPrice(Math.min(entry + 0.5 * atr14, maxForRR, maxForRisk), "down", latest.close);
-      plan = { entry, entryMin, entryMax, stop, target, riskPercent: risk / entry * 100, netRewardRisk: netRewardRisk(entry, stop, target), maxHoldingSessions: SWING_RULES.maxHoldingSessions, targetBasis: resistance < projected ? "resistance60" : "3R projection" };
+      const entryMax = roundPrice(entry + 0.5 * atr14, "down", latest.close);
+      plan = { entry, entryMin, entryMax, stop, target, riskPercent: risk / entry * 100, potentialRewardPercent: (target - entry) / entry * 100, netRewardRisk: netRewardRisk(entry, stop, target), maxHoldingSessions: SWING_RULES.maxHoldingSessions, targetBasis: resistance < projected ? "resistance60" : "3R projection" };
     }
   }
-  const riskOk = !!plan && plan.netRewardRisk >= SWING_RULES.minNetRewardRisk && plan.riskPercent <= SWING_RULES.maxRiskPercent && plan.entryMin <= plan.entry && plan.entryMax >= plan.entry;
   const scoreBreakdown = {
     trend: (latest.close > sma20 ? 8 : 0) + (sma20 > sma50 ? 10 : 0) + (sma50 > priorSma50 ? 7 : 0),
     momentum: (rsi14 >= 45 && rsi14 <= 75 ? 8 : 0) + (indicators.momentum20 > 0 ? 7 : 0),
     volume: indicators.volumeRatio20 >= 1.5 ? 15 : indicators.volumeRatio20 >= 1 ? 10 : indicators.volumeRatio20 >= 0.8 ? 5 : 0,
     setup: setup === "watch" ? 0 : 20,
     liquidity: liquid ? 10 : 0,
-    risk: (riskOk ? 10 : 0) + (volatility && !extended ? 5 : 0),
+    risk: (plan ? 10 : 0) + (volatility && !extended ? 5 : 0),
   };
   const score = Object.values(scoreBreakdown).reduce((sum, value) => sum + value, 0);
   const reasons: string[] = []; const warnings: string[] = [];
@@ -133,8 +127,8 @@ export function evaluateSwing(candles: MarketCandle[]): SwingAssessment {
   if (!momentum) warnings.push("Momentum/RSI di luar rentang swing.");
   if (!volatility) warnings.push("ATR di luar rentang 1–6% harga.");
   if (extended) warnings.push("Harga terlalu jauh dari EMA20 (>2,5 ATR).");
-  if (!riskOk) warnings.push("Rencana belum memenuhi R:R net ≥2 dan risiko harga ≤8%.");
+  if (setup !== "watch" && !plan) warnings.push("Target atau zona entry valid belum tersedia pada struktur harga saat ini.");
   if (discontinuity) warnings.push("Lompatan harga >35%: periksa aksi korporasi/penyesuaian data.");
-  const eligible = score >= SWING_RULES.minimumScore && trend && liquid && momentum && volatility && !extended && setup !== "watch" && riskOk && !discontinuity;
+  const eligible = score >= SWING_RULES.minimumScore && trend && liquid && momentum && volatility && !extended && setup !== "watch" && !!plan && !discontinuity;
   return { strategyVersion: STRATEGY_VERSION, setup, score, eligible, signal: eligible ? (setup === "breakout" ? "Swing breakout" : "Swing pullback") : "Tunggu konfirmasi", reasons, warnings, indicators, plan, scoreBreakdown };
 }

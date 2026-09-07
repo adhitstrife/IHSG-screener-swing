@@ -1,5 +1,5 @@
 import type { MarketCandle } from "./market-data";
-import { ema, evaluateSwing, netRewardRisk, SWING_RULES, type SwingPlan } from "./swing-strategy";
+import { ema, evaluateSwing, SWING_RULES, type SwingPlan } from "./swing-strategy";
 
 export type SwingTrade = {
   symbol: string; signalDate: string; entryDate: string; exitDate: string;
@@ -13,7 +13,6 @@ export function simulateSwingTrade(candles: MarketCandle[], signalIndex: number,
   const entryIndex = signalIndex + 1;
   const opening = candles[entryIndex];
   if (!opening || opening.volume <= 0 || opening.open < plan.entryMin || opening.open > plan.entryMax || opening.open <= plan.stop || opening.open >= plan.target) return undefined;
-  if (netRewardRisk(opening.open, plan.stop, plan.target) < SWING_RULES.minNetRewardRisk || (opening.open - plan.stop) / opening.open * 100 > SWING_RULES.maxRiskPercent) return undefined;
   let trendExit = false;
   for (let i = entryIndex; i < candles.length && i < entryIndex + plan.maxHoldingSessions; i++) {
     const candle = candles[i];

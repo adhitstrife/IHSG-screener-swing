@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { evaluateSwing, wilderIndicators, netRewardRisk, tickSize, roundPrice } = require('../.test-build/swing-strategy');
+const { evaluateSwing, wilderIndicators, tickSize, roundPrice } = require('../.test-build/swing-strategy');
 const { normalizeDailyCandles, completedDailyCandles, weekdayAge, isCurrentDailyScreenerRun, isFreshSnapshot } = require('../.test-build/market-data');
 const { simulateSwingTrade, calculateSwingTrades, portfolioMetrics } = require('../.test-build/swing-backtest');
 
@@ -65,15 +65,16 @@ test('daily screener run stays available until the next completed weekday sessio
   assert.equal(isCurrentDailyScreenerRun('2026-09-07T10:00:00Z', new Date('2026-09-07T10:30:00Z')), true);
 });
 
-test('a pullback with nearby overhead supply is rejected even with a high setup score', () => {
+test('a pullback with nearby overhead supply remains a technical setup while retaining its objective R:R', () => {
   const rows = history();
-  rows[78] = candle(rows[78].date, 1140, { open: 1160, high: 1165, low: 1130 });
+  for (let index = 19; index < 79; index++) rows[index].high = 1180;
+  rows[78] = candle(rows[78].date, 1140, { open: 1160, high: 1180, low: 1130 });
   rows[79] = candle(rows[79].date, 1160, { open: 1142, high: 1163, low: 1138 });
   const signal = evaluateSwing(rows);
   assert.equal(signal.setup, 'pullback');
-  assert.ok(signal.score >= 70);
-  assert.equal(signal.eligible, false);
-  assert.ok(!signal.plan || signal.plan.netRewardRisk < 2);
+  assert.equal(signal.eligible, true);
+  assert.ok(signal.plan.netRewardRisk < 2);
+  assert.ok(signal.plan.riskPercent > 8);
 });
 
 test('requires 60 bars and confirms an independently constructed liquid breakout', () => {
@@ -82,10 +83,8 @@ test('requires 60 bars and confirms an independently constructed liquid breakout
   assert.equal(signal.setup, 'breakout');
   assert.equal(signal.eligible, true, JSON.stringify(signal));
   assert.ok(signal.plan.stop < signal.plan.entry && signal.plan.entry < signal.plan.target);
-  assert.ok(signal.plan.netRewardRisk >= 2);
   assert.equal(signal.score, Object.values(signal.scoreBreakdown).reduce((sum, value) => sum + value, 0));
   assert.ok(signal.plan.entryMax >= signal.plan.entry);
-  assert.ok(netRewardRisk(signal.plan.entryMax, signal.plan.stop, signal.plan.target) >= 2);
 });
 
 test('a one-day volume spike cannot conceal poor multi-session liquidity', () => {
@@ -109,7 +108,7 @@ test('reference-price ticks remain consistent across a price-band boundary', () 
   assert.equal(roundPrice(1999, 'down', 2000), 1990);
 });
 
-const plan = { entry: 1000, entryMin: 990, entryMax: 1010, stop: 950, target: 1200, riskPercent: 5, netRewardRisk: 3, maxHoldingSessions: 15, targetBasis: '3R projection' };
+const plan = { entry: 1000, entryMin: 990, entryMax: 1010, stop: 950, target: 1200, riskPercent: 5, potentialRewardPercent: 20, netRewardRisk: 3, maxHoldingSessions: 15, targetBasis: '3R projection' };
 test('entry is next open, not the signal close; rejects chase gaps', () => {
   const rows = [candle('2026-01-01', 800), candle('2026-01-02', 1000, { open: 1000, high: 1210, low: 990 })];
   const trade = simulateSwingTrade(rows, 0, plan, 'TEST');
