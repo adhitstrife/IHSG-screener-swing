@@ -1,3 +1,5 @@
+import { Firecrawl } from "firecrawl";
+
 type YahooPoint = { asOfDate?: unknown; currencyCode?: unknown; reportedValue?: { raw?: unknown } };
 type YahooSeries = { [key: string]: unknown; meta?: { symbol?: unknown; type?: unknown } };
 
@@ -17,7 +19,7 @@ export type FundamentalResearch = {
 };
 
 export type WebSource = { title: string; url: string; snippet: string; publishedDate: string | null };
-export type WebResearch = { coverage: "available" | "not-configured" | "unavailable"; sources: WebSource[]; warning: string | null };
+export type WebResearch = { coverage: "available" | "not-configured" | "unavailable"; provider: "firecrawl" | "tavily" | null; sources: WebSource[]; warning: string | null };
 
 const researchCache = new Map<string, { expiresAt: number; value: Promise<{ fundamentals: FundamentalResearch; web: WebResearch }> }>();
 const TTL_MS = 15 * 60 * 1000;
@@ -78,9 +80,39 @@ async function fundamentals(symbol: string): Promise<{ research: FundamentalRese
   };
 }
 
-async function webSearch(symbol: string, companyQuery: string): Promise<WebResearch> {
+function webSources(items: unknown[]): WebSource[] {
+  const seen = new Set<string>();
+  return items.flatMap((item): WebSource[] => {
+    if (!item || typeof item !== "object") return [];
+    const result = item as { title?: unknown; url?: unknown; description?: unknown; snippet?: unknown; date?: unknown; markdown?: unknown; metadata?: { title?: unknown; url?: unknown; sourceURL?: unknown; publishedTime?: unknown; publishedDate?: unknown } };
+    const url = safeUrl(result.url) ?? safeUrl(result.metadata?.url) ?? safeUrl(result.metadata?.sourceURL);
+    const title = text(result.title) ?? text(result.metadata?.title);
+    if (!url || !title || seen.has(url)) return [];
+    seen.add(url);
+    const snippet = text(result.markdown) ?? text(result.snippet) ?? text(result.description) ?? "";
+    return [{ title: title.slice(0, 240), url, snippet: snippet.slice(0, 1_800), publishedDate: text(result.date) ?? text(result.metadata?.publishedTime) ?? text(result.metadata?.publishedDate) }];
+  }).slice(0, 5);
+}
+
+async function firecrawlSearch(symbol: string, companyQuery: string): Promise<WebResearch | null> {
+  const apiKey = process.env.FIRECRAWL_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const client = new Firecrawl({ apiKey });
+    const result = await client.search(`${companyQuery} ${symbol} IDX Indonesia berita kinerja keuangan aksi korporasi`, {
+      sources: ["news", "web"], limit: 5, tbs: "qdr:m", country: "ID", ignoreInvalidURLs: true, timeout: 25_000,
+      scrapeOptions: { formats: ["markdown"], onlyMainContent: true, fastMode: true, blockAds: true, removeBase64Images: true, timeout: 20_000, maxAge: 86_400_000, storeInCache: true },
+    });
+    const sources = webSources([...(result.news ?? []), ...(result.web ?? [])]);
+    return { coverage: sources.length ? "available" : "unavailable", provider: "firecrawl", sources, warning: sources.length ? null : "Firecrawl tidak menemukan sumber yang relevan dalam 30 hari terakhir." };
+  } catch (error) {
+    return { coverage: "unavailable", provider: "firecrawl", sources: [], warning: error instanceof Error ? `Firecrawl gagal: ${error.message}` : "Firecrawl gagal." };
+  }
+}
+
+async function tavilySearch(symbol: string, companyQuery: string): Promise<WebResearch> {
   const apiKey = process.env.TAVILY_API_KEY;
-  if (!apiKey) return { coverage: "not-configured", sources: [], warning: "Pencarian web belum dikonfigurasi." };
+  if (!apiKey) return { coverage: "not-configured", provider: null, sources: [], warning: "Pencarian web belum dikonfigurasi." };
   try {
     const response = await fetch("https://api.tavily.com/search", {
       method: "POST", headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
@@ -98,10 +130,18 @@ async function webSearch(symbol: string, companyQuery: string): Promise<WebResea
       seen.add(url);
       return [{ title: title.slice(0, 240), url, snippet: (text(result.content) ?? "").slice(0, 1_200), publishedDate: text(result.published_date) }];
     });
-    return { coverage: "available", sources, warning: sources.length ? null : "Tidak ada hasil web relevan dalam 30 hari terakhir." };
+    return { coverage: "available", provider: "tavily", sources, warning: sources.length ? null : "Tidak ada hasil web relevan dalam 30 hari terakhir." };
   } catch (error) {
-    return { coverage: "unavailable", sources: [], warning: error instanceof Error ? error.message : "Pencarian web gagal." };
+    return { coverage: "unavailable", provider: "tavily", sources: [], warning: error instanceof Error ? error.message : "Pencarian web gagal." };
   }
+}
+
+async function webSearch(symbol: string, companyQuery: string): Promise<WebResearch> {
+  const firecrawl = await firecrawlSearch(symbol, companyQuery);
+  if (firecrawl?.coverage === "available") return firecrawl;
+  const tavily = await tavilySearch(symbol, companyQuery);
+  if (tavily.coverage === "available") return { ...tavily, warning: firecrawl?.warning ? `${firecrawl.warning} Memakai fallback Tavily.` : null };
+  return firecrawl ?? tavily;
 }
 
 export function getFundamentalAndWebResearch(symbol: string) {

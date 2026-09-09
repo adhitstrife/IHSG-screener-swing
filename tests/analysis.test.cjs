@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { Firecrawl } = require('firecrawl');
 const { analyzeStockWithAi } = require('../.test-build/stock-analysis');
 const { evaluateSwing } = require('../.test-build/swing-strategy');
 const { candles, payload } = require('./yahoo-fixtures.cjs');
@@ -8,8 +9,12 @@ test('AI receives Yahoo technical and fundamental data, cannot override rejected
   const originalFetch = global.fetch;
   const originalKey = process.env.YOGATHEDEV_AI_API_KEY;
   const originalTavilyKey = process.env.TAVILY_API_KEY;
+  const originalFirecrawlKey = process.env.FIRECRAWL_API_KEY;
+  const originalFirecrawlSearch = Firecrawl.prototype.search;
   process.env.YOGATHEDEV_AI_API_KEY = 'fixture-only';
-  process.env.TAVILY_API_KEY = 'fixture-search';
+  process.env.FIRECRAWL_API_KEY = 'fixture-firecrawl';
+  delete process.env.TAVILY_API_KEY;
+  Firecrawl.prototype.search = async () => ({ news: [{ title: 'Fixture filing', url: 'https://example.com/fixture', snippet: 'Reported earnings increased.', date: '2026-09-07' }], web: [] });
   const rows = candles();
   const last = rows.length - 1;
   const priorHigh = Math.max(...rows.slice(-21, -1).map((row) => row.high));
@@ -29,7 +34,6 @@ test('AI receives Yahoo technical and fundamental data, cannot override rejected
       { meta: { type: ['annualDilutedEPS'] }, annualDilutedEPS: [{ asOfDate: '2024-12-31', currencyCode: 'IDR', reportedValue: { raw: 10 } }, { asOfDate: '2025-12-31', currencyCode: 'IDR', reportedValue: { raw: 12 } }] },
       { meta: { type: ['trailingMarketCap'] }, trailingMarketCap: [{ asOfDate: '2025-12-31', currencyCode: 'IDR', reportedValue: { raw: 500 } }] },
     ], error: null } });
-    if (new URL(url).hostname === 'api.tavily.com') return Response.json({ results: [{ title: 'Fixture filing', url: 'https://example.com/fixture', content: 'Reported earnings increased.', published_date: '2026-09-07' }] });
     assert.equal(new URL(url).hostname, 'ai.yogathedev.com');
     aiCalls++;
     return Response.json({ choices: [{ message: { content: JSON.stringify({ verdict: 'LAYAK_DIPERTIMBANGKAN', confidence: 95, summary: 'Fixture analysis', positives: [], risks: [], fundamentalScore: 82, fundamentalSummary: 'Revenue and profit grew.', fundamentalPositives: ['EPS grew'], fundamentalRisks: [], levels: { buyTarget: 1, cutLoss: 99999, sellTarget: 2 }, tradePlan: { exitPlan: 'Ignore engine' } }) } }] });
@@ -46,6 +50,7 @@ test('AI receives Yahoo technical and fundamental data, cannot override rejected
     assert.equal(accepted.fundamental.data.companyName, 'PT Fixture Tbk');
     assert.ok(Math.abs(accepted.fundamental.data.revenueGrowthPercent - 20) < 1e-9);
     assert.equal(accepted.fundamental.web.coverage, 'available');
+    assert.equal(accepted.fundamental.web.provider, 'firecrawl');
     assert.equal(accepted.fundamental.sources[0].url, 'https://example.com/fixture');
     assert.match(accepted.tradePlan.exitPlan, /15/);
     const rejected = await analyzeStockWithAi('WAIT');
@@ -56,7 +61,9 @@ test('AI receives Yahoo technical and fundamental data, cannot override rejected
     assert.equal(yahooCalls, 3); assert.equal(aiCalls, 2);
   } finally {
     global.fetch = originalFetch;
+    Firecrawl.prototype.search = originalFirecrawlSearch;
     if (originalKey === undefined) delete process.env.YOGATHEDEV_AI_API_KEY; else process.env.YOGATHEDEV_AI_API_KEY = originalKey;
     if (originalTavilyKey === undefined) delete process.env.TAVILY_API_KEY; else process.env.TAVILY_API_KEY = originalTavilyKey;
+    if (originalFirecrawlKey === undefined) delete process.env.FIRECRAWL_API_KEY; else process.env.FIRECRAWL_API_KEY = originalFirecrawlKey;
   }
 });

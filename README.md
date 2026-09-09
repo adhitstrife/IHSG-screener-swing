@@ -28,7 +28,8 @@ Optional configuration:
 | `CRON_SECRET` | Bearer secret for the scheduled scan endpoint |
 | `YOGATHEDEV_AI_API_KEY` | Server-only AI provider key |
 | `YOGATHEDEV_AI_MODEL` | Existing configured model, default `deepseek-v4-flash` |
-| `TAVILY_API_KEY` | Optional server-only key for web research in `/analysis`; without it, AI uses Yahoo fundamental data only |
+| `FIRECRAWL_API_KEY` | Optional primary server-only key for web research in `/analysis`; searches recent news/web sources and extracts main article content |
+| `TAVILY_API_KEY` | Optional server-only fallback if Firecrawl is unavailable; without either key, AI uses Yahoo fundamental data only |
 
 Do not commit real credentials. Dynamic discovery is the default even if an old SCREENER_SYMBOLS value exists. The scanner requests Indonesian JKT equities using price/volume bands in Yahoo's custom POST screener, pages through **all** results (250 per page), then checks the exact turnover proxy and symbol/currency metadata. There is no fixed total-stock limit or silent fallback to ten stocks. The default Rp5 billion proxy is a loose preliminary filter, not the strategy's prior-20-session turnover calculation; recently liquid stocks can be missed and missing Yahoo volume fields are excluded with coverage counts. No market-cap or daily-gainer filter is imposed.
 
@@ -60,7 +61,7 @@ The signal uses completed candles only. Entry is modeled at the next session's o
 
 Stop and target are active from entry. Starting on holding session 3, a close below EMA20 triggers exit on the following open. Otherwise exit at the close of holding session 15. Gap stops can execute below the intended stop price.
 
-The AI explains the same indicators and filters. It cannot activate a rejected setup or replace the engine's entry/stop/target levels. Its context includes Yahoo daily OHLCV plus Yahoo annual revenue, net income, diluted EPS and market capitalization. With `TAVILY_API_KEY`, it also receives a bounded set of recent web-search snippets and source links. Web snippets are treated as untrusted evidence, not instructions; when web search is unavailable, the result explicitly says so. Broker accumulation and foreign flows are not fabricated.
+The AI explains the same indicators and filters. It cannot activate a rejected setup or replace the engine's entry/stop/target levels. Its context includes Yahoo daily OHLCV plus Yahoo annual revenue, net income, diluted EPS and market capitalization. With `FIRECRAWL_API_KEY`, it searches up to five recent news/web sources and extracts their main article content before producing the fundamental context; `TAVILY_API_KEY` remains a fallback. Web content is treated as untrusted evidence, not instructions; when web research is unavailable, the result explicitly says so. Broker accumulation and foreign flows are not fabricated.
 
 ## Data quality and storage
 

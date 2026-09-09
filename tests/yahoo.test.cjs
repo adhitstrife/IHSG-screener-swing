@@ -62,7 +62,7 @@ test('wrong currency/exchange, null completed OHLC and conflicting sessions cann
     const data = chart(rows); Object.assign(data.meta, meta);
     assert.throws(() => normalizeYahooChart(data, 'TEST', rows[0].date, rows.at(-1).date), /Metadata/);
   }
-  const data = chart(rows); data.quotes[0].close = null;
+  const data = chart(rows); const weekdayIndex = rows.findIndex((row) => ![0, 6].includes(new Date(`${row.date}T00:00:00Z`).getUTCDay())); data.quotes[weekdayIndex].close = null;
   assert.equal(normalizeYahooChart(data, 'TEST', rows[0].date, rows.at(-1).date).quality.skippedBars, 1);
   const duplicate = chart(rows); duplicate.quotes.push({ ...duplicate.quotes[0], close: duplicate.quotes[0].close + 1 });
   assert.throws(() => normalizeYahooChart(duplicate, 'TEST', rows[0].date, rows.at(-1).date), /duplikat/);
