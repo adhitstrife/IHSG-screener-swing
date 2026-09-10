@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { evaluateSwing, wilderIndicators, tickSize, roundPrice } = require('../.test-build/swing-strategy');
 const { evaluateShortSwing, SHORT_SWING_VERSION } = require('../.test-build/short-swing-strategy');
-const { normalizeDailyCandles, completedDailyCandles } = require('../.test-build/market-data');
+const { normalizeDailyCandles, completedDailyCandles, isCurrentDailyScreenerRun } = require('../.test-build/market-data');
 const { simulateSwingTrade } = require('../.test-build/swing-backtest');
 
 function candle(date, close, extra = {}) {
@@ -86,6 +86,14 @@ test('completed daily candle cutoff remains conservative', () => {
   assert.equal(completedDailyCandles(rows, new Date('2026-09-04T09:29:59Z')).length, 1);
   assert.equal(completedDailyCandles(rows, new Date('2026-09-04T09:30:00Z')).length, 2);
   assert.equal(normalizeDailyCandles(rows).length, 2);
+});
+
+test('a screener snapshot from before the cutoff becomes stale after the daily candle is usable', () => {
+  const beforeCloseRun = '2026-09-10T08:01:00.000Z'; // 15:01 WIB
+  const afterCloseRun = '2026-09-10T09:31:00.000Z'; // 16:31 WIB
+  assert.equal(isCurrentDailyScreenerRun(beforeCloseRun, new Date('2026-09-10T09:29:00.000Z')), true);
+  assert.equal(isCurrentDailyScreenerRun(beforeCloseRun, new Date('2026-09-10T09:31:00.000Z')), false);
+  assert.equal(isCurrentDailyScreenerRun(afterCloseRun, new Date('2026-09-10T09:32:00.000Z')), true);
 });
 
 test('next-open simulator still rejects chase gaps', () => {

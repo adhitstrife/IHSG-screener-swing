@@ -37,11 +37,22 @@ export function isCurrentDailyScreenerRun(generatedAt: string, now = new Date())
   const generated = new Date(generatedAt);
   if (!Number.isFinite(generated.getTime()) || generated > now) return false;
   const current = jakartaClock(now);
+  const cutoffMinutes = 16 * 60 + 30;
   const expected = new Date(`${current.date}T00:00:00Z`);
-  if (current.minutes < 16 * 60 + 30 || expected.getUTCDay() === 0 || expected.getUTCDay() === 6) {
+  if (current.minutes < cutoffMinutes || expected.getUTCDay() === 0 || expected.getUTCDay() === 6) {
     do expected.setUTCDate(expected.getUTCDate() - 1); while (expected.getUTCDay() === 0 || expected.getUTCDay() === 6);
   }
-  return jakartaClock(generated).date === expected.toISOString().slice(0, 10);
+  const expectedDate = expected.toISOString().slice(0, 10);
+  const generatedClock = jakartaClock(generated);
+  const isWeekend = expected.getUTCDay() === 0 || expected.getUTCDay() === 6;
+  if (isWeekend) return generatedClock.date === expectedDate;
+  // During a weekday session, a scan made today still represents the latest
+  // completed candle (yesterday's), so do not start a new scan per visit.
+  if (current.minutes < cutoffMinutes) return generatedClock.date === current.date || generatedClock.date === expectedDate;
+  // A scan made earlier today deliberately omits today's unfinished candle.
+  // Once the publication buffer has passed, make it stale so the next page
+  // visit produces a run that includes the completed daily session.
+  return generatedClock.date === expectedDate && generatedClock.minutes >= cutoffMinutes;
 }
 
 /** Weekdays only: exchange holidays are deliberately not guessed. */
