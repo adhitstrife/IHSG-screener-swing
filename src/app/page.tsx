@@ -63,7 +63,6 @@ export default function Home() {
     finally { if (scanRequest.current === controller) setLoading(false); }
   }, []);
   useEffect(() => { const timer = window.setTimeout(() => { void loadScreener(); }, 0); return () => { window.clearTimeout(timer); scanRequest.current?.abort(); }; }, [loadScreener]);
-  useEffect(() => { if (!refreshing) return; const timer = window.setInterval(() => { void loadScreener(); }, 3000); return () => window.clearInterval(timer); }, [refreshing, loadScreener]);
 
   const modeRows = useMemo(() => (snapshot?.data ?? []).map((stock) => assessmentForMode(stock, mode)), [snapshot, mode]);
   const results = useMemo(() => {
@@ -175,7 +174,7 @@ function RefreshStatus({ progress, compact = false }: { progress?: RefreshProgre
   const percent = progress?.total ? Math.min(100, Math.round(progress.processed / progress.total * 100)) : 0;
   return <div role="status" className={compact ? "mx-auto max-w-md text-center" : "mb-5 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-indigo-950"}>
     <p className="text-sm font-bold">Memperbarui scan Yahoo Finance</p>
-    <p className="mt-1 text-xs leading-5 text-indigo-800">{progress ? `${progress.processed} dari ${progress.total} kandidat telah diproses. Halaman akan memperbarui otomatis setelah selesai.` : "Menyiapkan kandidat untuk scan. Halaman akan memperbarui otomatis."}</p>
+    <p className="mt-1 text-xs leading-5 text-indigo-800">{progress ? `${progress.processed} dari ${progress.total} kandidat telah diproses. Scan dilanjutkan di server tanpa polling dari browser; pilih Muat ulang hasil untuk memeriksa snapshot terbaru.` : "Menyiapkan kandidat untuk scan di server. Pilih Muat ulang hasil untuk memeriksa snapshot terbaru."}</p>
     <div className="mt-3 h-2 overflow-hidden rounded-full bg-indigo-100"><div className="h-full rounded-full bg-indigo-600 transition-all duration-500" style={{ width: `${percent}%` }} /></div>
     <p className="mt-1 text-right text-xs font-semibold text-indigo-700">{progress ? `${percent}%` : "Memulai…"}</p>
   </div>;
