@@ -55,6 +55,10 @@ The custom adapter uses the pinned client's internal _fetch because its public s
 
 Setup Quality totals 100: trend 25, structure 20, volume 15, momentum 15, relative strength 10, liquidity 10, market regime 5. Entry Quality totals 100: extension 25, risk 20, R:R 20, RSI/short-term momentum 15, breakout position 10, candle quality 10. Overall = Setup Quality ×60% + Entry Quality ×40%. Missing data, RSI above 70, extension above 2 ATR, risk above 10%, and weak data quality cap the relevant score.
 
+## Short swing mode
+
+The dashboard also offers **Short swing · 1–2 sesi**. It uses the same completed daily candles and liquidity checks but accepts only confirmed breakouts with RSI 55–70, volume confirmation, and EMA20 extension no greater than 1.5 ATR. Its technical stop is 1.15 ATR, target is capped at 2R or the nearer historical resistance, and a position that has not exited is closed at the second session's close. It is a daily momentum strategy, not intraday analysis; Yahoo's delayed daily data cannot support intraday entries or exits. Backtest follows the selected mode.
+
 ## Entry and exits
 
 The signal uses completed candles only. Entry is modeled at the next session's open, within a ±0.5 ATR band further restricted by the net R:R and price-risk limits. If opening is outside that zone, the signal expires; rescan rather than chase.

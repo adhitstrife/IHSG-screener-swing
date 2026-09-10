@@ -1,13 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
-import type { ScreenerSnapshot } from "./screener";
+import { SCREENER_STRATEGY_VERSION, type ScreenerSnapshot } from "./screener";
+import { STRATEGY_VERSION } from "./swing-strategy";
 import { universeConfig } from "./yahoo-universe";
 import { YAHOO_DATA_VERSION, YAHOO_PRICE_BASIS } from "./yahoo-data";
-import { STRATEGY_VERSION } from "./swing-strategy";
 import { isCurrentDailyScreenerRun, isFreshSnapshot } from "./market-data";
 import { mergeScanBatch } from "./screener-results";
 
 const CACHE_TTL_MS = 15 * 60 * 1000;
-const cacheKey = () => `${STRATEGY_VERSION}:${YAHOO_DATA_VERSION}:${YAHOO_PRICE_BASIS}:${universeConfig().key}`;
+const cacheKey = () => `${SCREENER_STRATEGY_VERSION}:${YAHOO_DATA_VERSION}:${YAHOO_PRICE_BASIS}:${universeConfig().key}`;
 
 function getAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -35,14 +35,14 @@ export async function getStoredScreenerPage(universeId: string, page: number): P
     .eq("cache_key", pageKey(universeId, page)).order("generated_at", { ascending: false }).limit(1).maybeSingle();
   if (error || !data || !isFreshSnapshot(data.generated_at)) return undefined;
   const snapshot = data.snapshot as ScreenerSnapshot;
-  if (snapshot?.meta?.universeId !== universeId || snapshot.meta.page !== page || snapshot.meta.pageSize !== 10 || snapshot.meta.strategyVersion !== STRATEGY_VERSION || snapshot.meta.dataVersion !== YAHOO_DATA_VERSION || snapshot.meta.priceBasis !== YAHOO_PRICE_BASIS || !Array.isArray(snapshot.data) || !Array.isArray(snapshot.meta.failures) || snapshot.data.length + snapshot.meta.failures.length !== snapshot.meta.pageCandidateCount || !isFreshSnapshot(snapshot.meta.generatedAt)) return undefined;
+  if (snapshot?.meta?.universeId !== universeId || snapshot.meta.page !== page || snapshot.meta.pageSize !== 10 || snapshot.meta.strategyVersion !== SCREENER_STRATEGY_VERSION || snapshot.meta.dataVersion !== YAHOO_DATA_VERSION || snapshot.meta.priceBasis !== YAHOO_PRICE_BASIS || !Array.isArray(snapshot.data) || !Array.isArray(snapshot.meta.failures) || snapshot.data.length + snapshot.meta.failures.length !== snapshot.meta.pageCandidateCount || !isFreshSnapshot(snapshot.meta.generatedAt)) return undefined;
   return snapshot;
 }
 
 export async function saveScreenerPage(snapshot: ScreenerSnapshot) {
   const client = getAdminClient();
   if (!client || !snapshot.meta.universeId || !snapshot.meta.page) return false;
-  const { error } = await client.from("swing_screening_runs").insert({ cache_key: pageKey(snapshot.meta.universeId, snapshot.meta.page), strategy_version: STRATEGY_VERSION, generated_at: snapshot.meta.generatedAt, snapshot });
+  const { error } = await client.from("swing_screening_runs").insert({ cache_key: pageKey(snapshot.meta.universeId, snapshot.meta.page), strategy_version: SCREENER_STRATEGY_VERSION, generated_at: snapshot.meta.generatedAt, snapshot });
   if (error) throw new Error(`Cache halaman belum tersimpan: ${error.message}`);
   return true;
 }
@@ -53,7 +53,7 @@ export async function saveScreenerRun(snapshot: ScreenerSnapshot, supabase = get
   if (snapshot.meta.batchOffset !== undefined) {
     if (!snapshot.meta.universeId) return false;
     const batchKey = `${cacheKey()}:batch:${snapshot.meta.universeId}`;
-    const { error } = await supabase.from("swing_screening_runs").insert({ cache_key: batchKey, strategy_version: STRATEGY_VERSION, generated_at: snapshot.meta.generatedAt, snapshot });
+    const { error } = await supabase.from("swing_screening_runs").insert({ cache_key: batchKey, strategy_version: SCREENER_STRATEGY_VERSION, generated_at: snapshot.meta.generatedAt, snapshot });
     if (error) throw new Error(`Batch belum tersimpan: ${error.message}`);
     if (snapshot.meta.nextOffset != null) return false;
     // Server-created batches can be joined across serverless instances. Never accept
@@ -84,7 +84,7 @@ export async function saveScreenerRun(snapshot: ScreenerSnapshot, supabase = get
     snapshot = { ...combined, meta: { ...combined.meta, batchOffset: undefined } };
   }
   const { error } = await supabase.from("swing_screening_runs").insert({
-    cache_key: cacheKey(), strategy_version: STRATEGY_VERSION,
+    cache_key: cacheKey(), strategy_version: SCREENER_STRATEGY_VERSION,
     generated_at: snapshot.meta.generatedAt, snapshot,
   });
   if (error) throw new Error(`Riwayat swing belum tersimpan: ${error.message}`);
@@ -100,9 +100,9 @@ export async function getLatestStoredScreenerRun(allowStale = false): Promise<Sc
     .order("generated_at", { ascending: false }).limit(1).maybeSingle();
   if (error || !run) return undefined;
   const snapshot = run.snapshot as ScreenerSnapshot;
-  if (snapshot?.meta?.strategyVersion !== STRATEGY_VERSION || !Array.isArray(snapshot.data) || !Array.isArray(snapshot.meta.failures) || snapshot.meta.nextOffset != null || !snapshot.meta.universeId) return undefined;
+  if (snapshot?.meta?.strategyVersion !== SCREENER_STRATEGY_VERSION || !Array.isArray(snapshot.data) || !Array.isArray(snapshot.meta.failures) || snapshot.meta.nextOffset != null || !snapshot.meta.universeId) return undefined;
   if (snapshot.meta.dataVersion !== YAHOO_DATA_VERSION || snapshot.meta.priceBasis !== YAHOO_PRICE_BASIS) return undefined;
-  if (snapshot.data.some((stock) => stock.strategyVersion !== STRATEGY_VERSION || !stock.indicators || !Array.isArray(stock.warnings))) return undefined;
+  if (snapshot.data.some((stock) => stock.strategyVersion !== STRATEGY_VERSION || !stock.shortTerm || stock.shortTerm.strategyVersion !== "short-swing-v1" || !stock.indicators || !Array.isArray(stock.warnings))) return undefined;
   if (!allowStale && !isCurrentDailyScreenerRun(run.generated_at)) return undefined;
   return { data: snapshot.data, meta: { ...snapshot.meta, source: "Yahoo Finance · Supabase cache" } };
 }

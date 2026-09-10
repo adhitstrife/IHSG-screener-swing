@@ -6,7 +6,7 @@ export function rankScanResults(rows: ScreenerStock[]) {
   return rows.map(stock => {
     if (!stock.stale && stock.asOf >= newest) return stock;
     const warning = "Data tertinggal terhadap kandidat lain atau >3 hari kerja; hari libur bursa belum terhubung.";
-    return { ...stock, stale: true, eligible: false, signal: "Data tertinggal", warnings: [...new Set([...stock.warnings, warning])] };
+    return { ...stock, stale: true, eligible: false, signal: "Data tertinggal", warnings: [...new Set([...stock.warnings, warning])], ...(stock.shortTerm ? { shortTerm: { ...stock.shortTerm, eligible: false, signal: "Data tertinggal", warnings: [...new Set([...stock.shortTerm.warnings, warning])] } } : {}) };
   }).sort((a, b) => Number(b.eligible) - Number(a.eligible) || b.score - a.score || (b.plan?.netRewardRisk ?? 0) - (a.plan?.netRewardRisk ?? 0) || a.symbol.localeCompare(b.symbol));
 }
 

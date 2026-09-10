@@ -1,12 +1,15 @@
 import { isFreshSnapshot, weekdayAge } from "./market-data";
 import { evaluateSwing, STRATEGY_VERSION, type SwingAssessment } from "./swing-strategy";
+import { evaluateShortSwing, SHORT_SWING_VERSION } from "./short-swing-strategy";
 import { getDailyHistory, YahooDataError } from "./yahoo-finance";
 import { YAHOO_DATA_VERSION, YAHOO_PRICE_BASIS, YAHOO_SOURCE } from "./yahoo-data";
 
 import { getCandidateUniverse, type CandidateUniverse, type UniverseStock } from "./yahoo-universe";
 import { rankScanResults } from "./screener-results";
 
-export type ScreenerStock = SwingAssessment & { symbol: string; name: string; price: number; change: number; volume: string; asOf: string; stale: boolean };
+export const SCREENER_STRATEGY_VERSION = `${STRATEGY_VERSION}+${SHORT_SWING_VERSION}`;
+
+export type ScreenerStock = SwingAssessment & { shortTerm: SwingAssessment; symbol: string; name: string; price: number; change: number; volume: string; asOf: string; stale: boolean };
 export type ScreenerSnapshot = {
   data: ScreenerStock[];
   meta: {
@@ -50,9 +53,11 @@ export function createScreenerService(loadHistory = getDailyHistory, universe: U
       try {
         const history = await loadHistory(stock.symbol, from.toISOString().slice(0, 10), now.toISOString().slice(0, 10), force);
         const candles = history.candles;
-        const assessment = evaluateSwing(candles, { benchmarkCandles: ihsg?.candles, dataQuality: history.quality });
+        const context = { benchmarkCandles: ihsg?.candles, dataQuality: history.quality };
+        const assessment = evaluateSwing(candles, context);
+        const shortTerm = evaluateShortSwing(candles, context);
         const latest = candles.at(-1)!; const previous = candles.at(-2)!;
-        results.push({ ...stock, ...assessment, warnings: [...assessment.warnings, ...history.warnings], price: latest.close, change: (latest.close / previous.close - 1) * 100, volume: formatVolume(latest.volume), asOf: latest.date, stale: weekdayAge(latest.date, now) > 3 });
+        results.push({ ...stock, ...assessment, shortTerm: { ...shortTerm, warnings: [...shortTerm.warnings, ...history.warnings] }, warnings: [...assessment.warnings, ...history.warnings], price: latest.close, change: (latest.close / previous.close - 1) * 100, volume: formatVolume(latest.volume), asOf: latest.date, stale: weekdayAge(latest.date, now) > 3 });
       } catch (error) {
         failures.push({ symbol: stock.symbol, reason: error instanceof Error ? error.message : "Data tidak tersedia." });
         if (error instanceof YahooDataError && [401, 403, 429].includes(error.status ?? 0)) {
@@ -68,7 +73,7 @@ export function createScreenerService(loadHistory = getDailyHistory, universe: U
     const data = rankScanResults(results);
     return {
       data,
-      meta: { strategyVersion: STRATEGY_VERSION, dataVersion: YAHOO_DATA_VERSION, priceBasis: YAHOO_PRICE_BASIS, generatedAt: now.toISOString(), universeSize: stocks.length, scannedSize: data.length, failures, source: YAHOO_SOURCE, quoteDelayMinutes: 10, warnings: candidates?.warnings ?? [], universeId: candidates?.id, candidateSource: candidates?.source, candidateFilter: candidates?.filter, yahooMatches: candidates?.yahooMatches },
+      meta: { strategyVersion: SCREENER_STRATEGY_VERSION, dataVersion: YAHOO_DATA_VERSION, priceBasis: YAHOO_PRICE_BASIS, generatedAt: now.toISOString(), universeSize: stocks.length, scannedSize: data.length, failures, source: YAHOO_SOURCE, quoteDelayMinutes: 10, warnings: candidates?.warnings ?? [], universeId: candidates?.id, candidateSource: candidates?.source, candidateFilter: candidates?.filter, yahooMatches: candidates?.yahooMatches },
     };
   }
 

@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { evaluateSwing, wilderIndicators, tickSize, roundPrice } = require('../.test-build/swing-strategy');
+const { evaluateShortSwing, SHORT_SWING_VERSION } = require('../.test-build/short-swing-strategy');
 const { normalizeDailyCandles, completedDailyCandles } = require('../.test-build/market-data');
 const { simulateSwingTrade } = require('../.test-build/swing-backtest');
 
@@ -49,6 +50,15 @@ test('breakout requires prior 20-session high, volume confirmation, close locati
   chased.at(-1).close += assessment.indicators.atr14 * 3;
   chased.at(-1).high += assessment.indicators.atr14 * 3;
   assert.notEqual(evaluateSwing(chased, { benchmarkCandles: benchmark() }).setup, 'breakout');
+});
+
+test('short swing has its own two-session momentum plan and never extends its target beyond 2R', () => {
+  const assessment = evaluateShortSwing(breakout(), { benchmarkCandles: benchmark() });
+  assert.equal(assessment.strategyVersion, SHORT_SWING_VERSION);
+  assert.equal(assessment.plan.maxHoldingSessions, 2);
+  const grossRisk = assessment.plan.entry - assessment.plan.stop;
+  assert.ok(assessment.plan.target <= assessment.plan.entry + grossRisk * 2);
+  assert.ok(assessment.warnings.some((warning) => warning.includes('Short swing')) || assessment.signal === 'Momentum 1–2 hari');
 });
 
 test('separates setup quality from entry quality and caps extended entries', () => {

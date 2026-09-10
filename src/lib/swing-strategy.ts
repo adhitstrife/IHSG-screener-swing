@@ -46,7 +46,7 @@ export type SwingIndicators = {
 export type SwingPlan = {
   entry: number; entryMin: number; entryMax: number; stop: number; target: number;
   riskPercent: number; potentialRewardPercent: number; netRewardRisk: number; maxHoldingSessions: number;
-  targetBasis: "historical-resistance" | "projected-3R"; targetConfidence: "high" | "reduced";
+  targetBasis: "historical-resistance" | "projected-3R" | "projected-2R"; targetConfidence: "high" | "reduced";
 };
 export type ScoreBreakdown = { setup: Record<string, number>; entry: Record<string, number> };
 export type SwingAssessment = {
